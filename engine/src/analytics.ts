@@ -146,8 +146,9 @@ export function checkpointDue(
 ): CheckpointKind | null {
   const cal = makeCalendar(state.semester, state.settings.timezone);
   if (!history.endDone && now >= cal.rangeEnd) return 'end';
-  const week = localInfo(cal, now).weekIndex;
-  if (!history.midDone && week >= Math.floor(cal.weeks / 2)) return 'mid';
+  // Середина — по времени, а не по номеру недели: семестр может начаться не с понедельника.
+  const middle = cal.rangeStart + (cal.rangeEnd - cal.rangeStart) / 2;
+  if (!history.midDone && now >= middle) return 'mid';
 
   const recent = state.sessions.filter(
     (s) =>

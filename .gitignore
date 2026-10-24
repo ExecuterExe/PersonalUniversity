@@ -8,3 +8,6 @@ data/
 
 # Секреты Google
 .env
+
+# Личные данные для симулятора
+engine/sim/my-*.json

@@ -116,6 +116,16 @@ describe('калибровка длительности', () => {
 });
 
 describe('контрольные точки', () => {
+  it('середина считается по времени, даже если семестр начался в воскресенье', () => {
+    const sunday = {
+      ...state([]),
+      semester: { startDate: '2026-11-01', weeks: 13 }, // воскресенье + 12 полных недель
+    };
+    const history = { midDone: false, endDone: false };
+    expect(checkpointDue(sunday, moment(5, 7, '08:00'), history)).toBeNull();
+    expect(checkpointDue(sunday, moment(6, 1, '08:00'), history)).toBe('mid'); // после 6 полных недель
+  });
+
   const empty = { midDone: false, endDone: false };
 
   it('середина семестра — на 7-й неделе из 12, один раз', () => {

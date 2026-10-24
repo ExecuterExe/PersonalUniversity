@@ -116,9 +116,16 @@ function report(title: string, input: PlanInput, details: boolean): void {
   const lastDay = DateTime.fromMillis(cal.rangeEnd - 1, { zone: cal.zone });
   const firstDay = DateTime.fromMillis(cal.rangeStart, { zone: cal.zone });
 
+  // Если семестр начался не с понедельника, первая неделя неполная — она «нулевая».
+  const leadDays = firstDay.weekday === 1 ? 0 : 8 - firstDay.weekday;
+  const weekNumber = (instant: number) => localInfo(cal, instant).weekIndex + (leadDays ? 0 : 1);
+  const length = leadDays
+    ? `${cal.weeks - 1} полных нед. + ${leadDays} дн. в начале`
+    : `${cal.weeks} нед.`;
+
   console.log(`\n══ ${title} ══`);
   console.log(
-    `Семестр: ${firstDay.toFormat('dd.LL.yyyy')} – ${lastDay.toFormat('dd.LL.yyyy')} · ${cal.weeks} нед. · ${cal.zone}`,
+    `Семестр: ${firstDay.toFormat('dd.LL.yyyy')} – ${lastDay.toFormat('dd.LL.yyyy')} · ${length} · ${cal.zone}`,
   );
   const excluded = settings.excludedWeekdays.map((w) => WEEKDAY_SHORT[w]).join(', ');
   console.log(
@@ -183,7 +190,7 @@ function report(title: string, input: PlanInput, details: boolean): void {
     `\nЧерновик: ${state.sessions.length} ${plural(state.sessions.length, SESSION_FORMS)} · перенесено из-за событий: ${result.moved} · без решения: ${result.conflicts.length}`,
   );
   for (const s of moved.slice(0, details ? moved.length : 8)) {
-    const week = localInfo(cal, s.start).weekIndex + 1;
+    const week = weekNumber(s.start);
     console.log(
       `   нед. ${String(week).padStart(2)}: «${name(s.disciplineId)}» ${formatMoment(s.originalStart!, cal.zone)} → ${formatMoment(s.start, cal.zone)} (${s.moveReason})`,
     );
@@ -200,7 +207,7 @@ function report(title: string, input: PlanInput, details: boolean): void {
   if (details) {
     console.log('\nВсе занятия:');
     for (const s of state.sessions) {
-      const week = localInfo(cal, s.start).weekIndex + 1;
+      const week = weekNumber(s.start);
       console.log(
         `   нед. ${String(week).padStart(2)}  ${formatInterval(s.start, s.end, cal.zone)}  ${name(s.disciplineId)}`,
       );
