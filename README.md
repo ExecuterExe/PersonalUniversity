@@ -22,6 +22,15 @@ npm run dev
 | `npm test`          | только тесты                                      |
 | `npm run check:env` | проверяет ключи Google в `.env`, не показывая их  |
 | `npm run format`    | выравнивает форматирование кода                   |
+| `npm run simulate`  | печатает расписание тестовых сценариев таблицей   |
+
+Свои дисциплины и календарь можно прогнать через симулятор: скопируй [engine/sim/semester.example.json](engine/sim/semester.example.json), поправь и запусти:
+
+```bash
+npm run simulate -- --file engine/sim/semester.example.json
+```
+
+Флаг `--details` печатает все занятия семестра.
 
 ## Структура
 

@@ -1,0 +1,20 @@
+{
+  "semester": { "startDate": "2026-11-02", "weeks": 12 },
+  "timezone": "Europe/Moscow",
+  "settings": {
+    "studyWindows": [["17:00", "22:00"]],
+    "excludedWeekdays": [],
+    "bufferMinutes": 15,
+    "maxDailyMinutes": 180,
+    "maxWeeklyMinutes": 600
+  },
+  "disciplines": [
+    { "name": "Когнитивные искажения", "priority": "main", "durationMinutes": 90 },
+    { "name": "Логические ошибки", "priority": "main", "durationMinutes": 90 },
+    { "name": "Критическое мышление", "priority": "additional", "durationMinutes": 60 }
+  ],
+  "busy": {
+    "weekly": [{ "weekdays": [1, 2, 3, 4, 5], "from": "09:00", "to": "18:00", "title": "Работа" }],
+    "oneOff": [{ "date": "2026-11-10", "from": "19:00", "to": "21:00", "title": "Концерт" }]
+  }
+}
