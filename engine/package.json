@@ -1,0 +1,14 @@
+{
+  "name": "@ou/engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Движок расписания: чистая логика без ввода-вывода",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# База и резервные копии — только на этом ПК
+data/
+
+# Секреты Google
+.env
