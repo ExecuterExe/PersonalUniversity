@@ -5,6 +5,7 @@ import {
   applySkeletonChange,
   calibrationSuggestions,
   changeDuration,
+  checkPlacement,
   checkpointDue,
   describeEvents,
   detectConflicts,
@@ -86,8 +87,16 @@ export async function runChecks(deps: Deps): Promise<void> {
       );
     }
     // Событие убрали из календаря — вопрос больше не нужен.
+    // Правка в Google про занятие, которое уже прошло или не в плане, — тоже.
+    const editable = new Set(
+      plan.state.sessions.filter((s) => s.status === 'planned' && s.start > now).map((s) => s.id),
+    );
     for (const d of store.listDecisions('open')) {
-      if (d.kind === 'conflict' && !conflicting.has(d.payload.sessionId as string)) {
+      const sessionId = d.payload.sessionId as string;
+      if (
+        (d.kind === 'conflict' && !conflicting.has(sessionId)) ||
+        (d.kind === 'calendar-edit' && !editable.has(sessionId))
+      ) {
         store.resolveDecision(d.id, { action: 'gone' }, now);
       }
     }
@@ -235,6 +244,25 @@ function present(
     };
   }
 
+  if (d.kind === 'calendar-edit') {
+    const s = sessionOf(d.payload.sessionId as string)!;
+    const name = deps.store.getDiscipline(s.disciplineId)?.name ?? s.disciplineId;
+    if (d.payload.type === 'deleted') {
+      return {
+        ...base,
+        title: `«${name}» удалено из Google Календаря. Пропустить это занятие или вернуть его?`,
+        session: sessionView(deps, sem, s),
+        actions: ['skip', 'restore'],
+      };
+    }
+    return {
+      ...base,
+      title: `«${name}» перенесено в Google Календаре, но так нарушаются правила: ${(d.payload.violations as string[]).join('; ')}`,
+      session: sessionView(deps, sem, s),
+      actions: ['keep', 'revert'],
+    };
+  }
+
   const kind = d.payload.kind as CheckpointKind;
   return {
     ...base,
@@ -271,6 +299,8 @@ export const resolveInput = z.discriminatedUnion('action', [
   z.object({ action: z.literal('extend'), weeks: z.number().int().min(1).max(8) }),
   z.object({ action: z.literal('biweekly'), disciplineId: z.string() }),
   z.object({ action: z.literal('finish'), archive: z.array(z.string()).default([]) }),
+  z.object({ action: z.literal('revert') }),
+  z.object({ action: z.literal('restore') }),
 ]);
 type Resolution = z.infer<typeof resolveInput>;
 
@@ -390,6 +420,40 @@ export async function resolveDecision(
       });
     } else {
       store.resolveDecision(d.id, answer, now);
+    }
+  } else if (d.kind === 'calendar-edit') {
+    const sessionId = d.payload.sessionId as string;
+    const s = state.sessions.find((x) => x.id === sessionId);
+    if (!s) throw stale();
+    if (d.payload.type === 'deleted') {
+      allowed(['skip', 'restore']);
+      store.transaction(() => {
+        // «Вернуть» — событие появится снова при следующей синхронизации.
+        if (answer.action === 'skip') {
+          saveSessions(
+            state.sessions.map((x) =>
+              x.id === sessionId ? { ...x, status: 'skipped' as const } : x,
+            ),
+          );
+        }
+        store.resolveDecision(d.id, answer, now);
+      });
+    } else {
+      allowed(['keep', 'revert']);
+      store.transaction(() => {
+        if (answer.action === 'revert') {
+          const start = d.payload.previousStart as number;
+          const end = d.payload.previousEnd as number;
+          const back = { ...s, start, end };
+          const others = state.sessions.filter((x) => x.id !== sessionId);
+          const codes = [...new Set(checkPlacement(ctx, back, others).map((v) => v.code))];
+          const reverted: Session = { ...back };
+          delete reverted.acceptedViolations;
+          if (codes.length > 0) reverted.acceptedViolations = codes;
+          saveSessions([...others, reverted]);
+        }
+        store.resolveDecision(d.id, answer, now);
+      });
     }
   } else {
     const kind = d.payload.kind as CheckpointKind;

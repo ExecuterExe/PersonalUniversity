@@ -1,5 +1,6 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type {
+  BusyEvent,
   Budget,
   CheckpointHistory,
   Compromise,
@@ -89,7 +90,7 @@ export interface SummaryRecord {
   createdAt: Instant;
 }
 
-export type DecisionKind = 'conflict' | 'missed' | 'calibration' | 'checkpoint';
+export type DecisionKind = 'conflict' | 'missed' | 'calibration' | 'checkpoint' | 'calendar-edit';
 
 export interface DecisionRecord {
   id: string;
@@ -105,6 +106,55 @@ export interface DecisionRecord {
 export interface TimerRecord {
   semesterId: string;
   state: TimerState;
+}
+
+export interface GoogleTokens {
+  accessToken: string;
+  /** Когда истекает доступ, миллисекунды Unix. */
+  expiresAt: Instant;
+  refreshToken: string;
+  scope: string;
+}
+
+/** Подключение к Google: доступ, свой календарь, состояние синхронизации. */
+export interface GoogleAccount {
+  tokens: GoogleTokens | null;
+  email: string | null;
+  /** Доступ истёк (раз в 7 дней в режиме Testing) — нужно войти заново. */
+  needsReauth: boolean;
+  /** Календарь «Мой университет». */
+  calendarId: string | null;
+  /** Из каких календарей брать занятость; null — из всех, кроме своего. */
+  busyCalendarIds: string[] | null;
+  lastSyncAt: Instant | null;
+  lastSyncError: string | null;
+}
+
+export const EMPTY_GOOGLE_ACCOUNT: GoogleAccount = {
+  tokens: null,
+  email: null,
+  needsReauth: false,
+  calendarId: null,
+  busyCalendarIds: null,
+  lastSyncAt: null,
+  lastSyncError: null,
+};
+
+export interface CalendarLink {
+  semesterId: string;
+  sessionId: string;
+  eventId: string;
+  /** Что мы записали в событие последним — чтобы отличать свои изменения от правок пользователя. */
+  start: Instant;
+  end: Instant;
+  summary: string;
+}
+
+export interface BusyCache {
+  rangeStart: Instant;
+  rangeEnd: Instant;
+  fetchedAt: Instant;
+  events: BusyEvent[];
 }
 
 type Row = Record<string, unknown>;
@@ -574,6 +624,97 @@ export class Store {
       `UPDATE decisions SET status = 'resolved', resolution = $resolution, resolved_at = $now WHERE id = $id`,
       { id, resolution: JSON.stringify(resolution), now },
     );
+  }
+
+  // Google
+
+  getGoogleAccount(): GoogleAccount {
+    const row = this.get('SELECT data FROM google_account WHERE id = 1');
+    return row
+      ? { ...EMPTY_GOOGLE_ACCOUNT, ...json<Partial<GoogleAccount>>(row.data, {}) }
+      : EMPTY_GOOGLE_ACCOUNT;
+  }
+
+  saveGoogleAccount(account: GoogleAccount): void {
+    this.run(
+      'INSERT INTO google_account (id, data) VALUES (1, $data) ON CONFLICT (id) DO UPDATE SET data = excluded.data',
+      { data: JSON.stringify(account) },
+    );
+  }
+
+  updateGoogleAccount(patch: Partial<GoogleAccount>): GoogleAccount {
+    const next = { ...this.getGoogleAccount(), ...patch };
+    this.saveGoogleAccount(next);
+    return next;
+  }
+
+  listLinks(semesterId: string): CalendarLink[] {
+    return this.all('SELECT * FROM calendar_links WHERE semester_id = $id', { id: semesterId }).map(
+      (r) => ({
+        semesterId: r.semester_id as string,
+        sessionId: r.session_id as string,
+        eventId: r.event_id as string,
+        start: Number(r.start),
+        end: Number(r.end),
+        summary: r.summary as string,
+      }),
+    );
+  }
+
+  saveLink(link: CalendarLink): void {
+    this.run(
+      `INSERT OR REPLACE INTO calendar_links (semester_id, session_id, event_id, start, end, summary)
+       VALUES ($semester, $session, $event, $start, $end, $summary)`,
+      {
+        semester: link.semesterId,
+        session: link.sessionId,
+        event: link.eventId,
+        start: link.start,
+        end: link.end,
+        summary: link.summary,
+      },
+    );
+  }
+
+  deleteLink(semesterId: string, sessionId: string): void {
+    this.run('DELETE FROM calendar_links WHERE semester_id = $semester AND session_id = $session', {
+      semester: semesterId,
+      session: sessionId,
+    });
+  }
+
+  clearLinks(): void {
+    this.run('DELETE FROM calendar_links');
+  }
+
+  getBusyCache(): BusyCache | null {
+    const row = this.get('SELECT * FROM busy_cache WHERE id = 1');
+    return row
+      ? {
+          rangeStart: Number(row.range_start),
+          rangeEnd: Number(row.range_end),
+          fetchedAt: Number(row.fetched_at),
+          events: json<BusyEvent[]>(row.events, []),
+        }
+      : null;
+  }
+
+  saveBusyCache(cache: BusyCache): void {
+    this.run(
+      `INSERT INTO busy_cache (id, range_start, range_end, fetched_at, events) VALUES (1, $start, $end, $fetched, $events)
+       ON CONFLICT (id) DO UPDATE SET range_start = excluded.range_start, range_end = excluded.range_end,
+         fetched_at = excluded.fetched_at, events = excluded.events`,
+      {
+        start: cache.rangeStart,
+        end: cache.rangeEnd,
+        fetched: cache.fetchedAt,
+        events: JSON.stringify(cache.events),
+      },
+    );
+  }
+
+  clearBusyCache(): void {
+    this.run('DELETE FROM busy_cache');
   }
 
   // Служебное

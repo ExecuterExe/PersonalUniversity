@@ -11,6 +11,8 @@ import {
   type Settings,
 } from '@ou/engine';
 import type { CalendarSource } from '../calendar';
+import type { GoogleApi } from '../google/api';
+import type { GoogleCalendarSource } from '../google/source';
 import type { SemesterRecord, Store } from '../db/store';
 import { conflict, notFound } from '../errors';
 import { defaultAppSettings, toEngineSettings, type AppSettings } from '../settings';
@@ -21,6 +23,10 @@ export interface Deps {
   calendar: CalendarSource;
   now: () => Instant;
   newId: () => string;
+  /** Есть, если ключи Google заданы. */
+  google?: { api: GoogleApi; source: GoogleCalendarSource };
+  /** Вызывается после любого изменения через API — например, чтобы отправить план в Google. */
+  afterChange?: () => void;
 }
 
 export function appSettings(store: Store): AppSettings {

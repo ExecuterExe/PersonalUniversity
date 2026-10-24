@@ -68,3 +68,16 @@
 |---|---|
 | `GET /export/summaries[?format=json]` | Все итоги занятий (Markdown по умолчанию) |
 | `GET /health` | Сервер жив, версия движка, есть ли ключи Google |
+
+## Google Календарь
+
+| Запрос | Что делает |
+|---|---|
+| `GET /auth/google` | Перейти ко входу в Google (открывать в обычном браузере) |
+| `GET /auth/google/callback` | Сюда Google возвращает после входа; дальше — на главную с `?google=connected` |
+| `GET /google/status` | Подключён ли, кто вошёл, нужен ли повторный вход, когда обновлялась занятость, последняя ошибка |
+| `GET /google/calendars` | Календари и какие из них учитываются как занятость |
+| `PUT /google/calendars` | Выбрать календари: `busyCalendarIds` (null — все) |
+| `GET /google/busy?days=14` | Что сервис видит как занятость в ближайшие дни |
+| `POST /google/sync` | Синхронизировать сейчас |
+| `POST /google/disconnect` | Отключить и отозвать доступ |

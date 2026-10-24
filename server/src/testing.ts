@@ -31,30 +31,46 @@ export const USER_SETTINGS = {
   defaultSemesterWeeks: 12,
 };
 
-export function testApp(start: number, events: BusyEvent[] = []) {
+/**
+ * Приложение с базой в памяти. С fetch — подключён (поддельный) Google и занятость берётся из него;
+ * без — из списка events.
+ */
+export function testApp(start: number, events: BusyEvent[] = [], google?: { fetch: typeof fetch }) {
   let now = start;
   let counter = 0;
   const calendar = new StaticCalendar(events);
+  const config = google
+    ? loadConfig({
+        GOOGLE_CLIENT_ID: 'test.apps.googleusercontent.com',
+        GOOGLE_CLIENT_SECRET: 'secret',
+      })
+    : loadConfig({});
   const deps = createDeps({
     dbPath: ':memory:',
-    calendar,
+    ...(google ? { config, fetch: google.fetch } : { calendar }),
     now: () => now,
     newId: () => `id${++counter}`,
   });
-  const app = buildApp(loadConfig({}), deps);
+  const app = buildApp(config, deps);
 
   async function call(
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     url: string,
     body?: unknown,
-  ): Promise<{ status: number; body: AnyJson; text: string }> {
+  ): Promise<{ status: number; body: AnyJson; text: string; location?: string }> {
     const res = await app.inject({
       method,
       url,
       ...(body === undefined ? {} : { payload: body as object }),
     });
     const json = res.headers['content-type']?.toString().includes('application/json');
-    return { status: res.statusCode, body: json ? res.json() : null, text: res.body };
+    const location = res.headers.location?.toString();
+    return {
+      status: res.statusCode,
+      body: json ? res.json() : null,
+      text: res.body,
+      ...(location ? { location } : {}),
+    };
   }
 
   return {

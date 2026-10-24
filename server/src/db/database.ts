@@ -119,6 +119,33 @@ const MIGRATIONS: string[] = [
     value TEXT NOT NULL
   );
   `,
+  `
+  -- Google: доступ, свой календарь, состояние синхронизации.
+  CREATE TABLE google_account (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    data TEXT NOT NULL
+  );
+
+  -- Какое событие в «Мой университет» соответствует занятию и что мы туда записали последним.
+  CREATE TABLE calendar_links (
+    semester_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    end INTEGER NOT NULL,
+    summary TEXT NOT NULL,
+    PRIMARY KEY (semester_id, session_id)
+  );
+
+  -- Последняя занятость из Google — чтобы работать без интернета.
+  CREATE TABLE busy_cache (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    range_start INTEGER NOT NULL,
+    range_end INTEGER NOT NULL,
+    fetched_at INTEGER NOT NULL,
+    events TEXT NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {
