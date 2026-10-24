@@ -16,10 +16,13 @@ export class BusyIndex {
   private readonly maxLength: number;
 
   constructor(events: readonly BusyEvent[], bufferMinutes: number) {
-    const pad = bufferMinutes * MINUTE;
+    const buffer = bufferMinutes * MINUTE;
     this.items = events
       .filter((e) => e.end > e.start)
-      .map((event) => ({ start: event.start - pad, end: event.end + pad, event }))
+      .map((event) => {
+        const pad = event.noBuffer ? 0 : buffer;
+        return { start: event.start - pad, end: event.end + pad, event };
+      })
       .sort((a, b) => a.start - b.start);
     this.maxLength = this.items.reduce((max, i) => Math.max(max, i.end - i.start), 0);
   }

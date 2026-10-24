@@ -56,9 +56,9 @@ describe('статистика', () => {
     expect(disciplineStats(s)).toEqual([
       {
         disciplineId: 'biases',
-        plannedMinutes: 5 * 90,
+        plannedMinutes: 5 * 75, // 90 минут занятия = 75 минут чистой учёбы
         actualMinutes: 90 + 30 + 60,
-        progress: 180 / 450,
+        progress: 180 / 375,
         held: 2,
         missed: 1,
         skipped: 1,
@@ -87,8 +87,8 @@ describe('статистика', () => {
       session('d', 1, 5, '19:00', 'planned'),
     ]);
     const result = forecast(s, moment(1, 4, '12:00'));
-    expect(result.overall).toBeCloseTo(135 / 270);
-    expect(result.perDiscipline.biases).toBeCloseTo(135 / 270);
+    expect(result.overall).toBeCloseTo(135 / 225);
+    expect(result.perDiscipline.biases).toBeCloseTo(135 / 225);
     expect(forecast(state([]), moment(1, 4, '12:00')).overall).toBeNull();
   });
 });

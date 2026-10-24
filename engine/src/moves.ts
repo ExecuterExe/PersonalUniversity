@@ -110,7 +110,7 @@ export function findMoveOptions(
       days.push({ dayIndex: d, kind: 'makeup' });
   }
 
-  const placementId = mode === 'conflict' ? session.id : `${session.id}+makeup`;
+  const placementId = mode === 'conflict' ? session.id : `${session.id}.makeup`;
   const bestPerDay = new Map<number, MoveOption>();
   for (const { dayIndex, kind } of days) {
     if (dayIndex < today || instantAt(cal, dayIndex, 0) >= cal.rangeEnd) continue;
@@ -202,7 +202,7 @@ export function addMakeup(
   const missed = sessions.find((s) => s.id === missedId);
   if (!missed) throw new Error(`Неизвестное занятие: ${missedId}`);
   const makeup: Session = {
-    id: `${missed.id}+makeup`,
+    id: `${missed.id}.makeup`,
     disciplineId: missed.disciplineId,
     start: option.start,
     end: option.end,

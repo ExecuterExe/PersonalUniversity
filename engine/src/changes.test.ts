@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { buildPlan } from './build';
-import { addDiscipline, extendSemester, makeBiweekly, removeDiscipline } from './changes';
+import {
+  addDiscipline,
+  changeDuration,
+  extendSemester,
+  makeBiweekly,
+  removeDiscipline,
+} from './changes';
 import { localInfo } from './time';
 import { contextFor, planViolations } from './fixtures/check';
 import { DISCIPLINES, input, moment, settings } from './fixtures/scenarios';
@@ -119,6 +125,45 @@ describe('действия контрольной точки', () => {
   it('раз в 2 недели нельзя сделать основную, которая идёт 3 раза', () => {
     const { state } = basePlan();
     expect(makeBiweekly(state, 'biases', NOW).ok).toBe(false);
+  });
+});
+
+describe('смена длительности', () => {
+  it('короче: будущие занятия на тех же местах, заканчиваются раньше; прошлое не меняется', () => {
+    const { state, busy } = basePlan();
+    const result = changeDuration(state, 'biases', 60, busy, NOW);
+    expect(result.ok).toBe(true);
+    const next = result.state!;
+    expect(next.disciplines.find((d) => d.id === 'biases')!.durationMinutes).toBe(60);
+    expect(past(next)).toEqual(past(state));
+    for (const s of future(next).filter((x) => x.disciplineId === 'biases')) {
+      const was = state.sessions.find((x) => x.id === s.id)!;
+      expect(s.start).toBe(was.start);
+      expect((s.end - s.start) / 60_000).toBe(60);
+    }
+    expect(result.after!.peakMinutes).toBe(result.before.peakMinutes - 3 * 30);
+    expect(planViolations(contextFor(next, busy), future(next))).toEqual([]);
+    // Новые слоты каркаса продолжаются с новой длительностью.
+    const extended = extendSemester(next, 1, busy, NOW).state!;
+    const lastWeek = extended.sessions.filter(
+      (s) => s.disciplineId === 'biases' && s.start >= moment(12, 1, '00:00'),
+    );
+    expect(lastWeek.length).toBe(3);
+    expect(lastWeek.every((s) => s.end - s.start === 60 * 60_000)).toBe(true);
+  });
+
+  it('длиннее, если не помещается, — ничего не меняет и объясняет', () => {
+    const { state, busy } = basePlan();
+    const shorter = changeDuration(state, 'thinking', 30, busy, NOW).state!;
+    const result = changeDuration(
+      { ...shorter, settings: { ...shorter.settings, maxDailyMinutes: 60 } },
+      'thinking',
+      90,
+      busy,
+      NOW,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.failure).toMatch(/^С новой длительностью не все занятия помещаются/);
   });
 });
 

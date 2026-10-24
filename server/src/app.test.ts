@@ -2,10 +2,11 @@ import { ENGINE_VERSION } from '@ou/engine';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from './app';
 import { loadConfig } from './config';
+import { createDeps } from './deps';
 
 describe('GET /api/health', () => {
   it('отвечает, что сервер работает, и видит движок', async () => {
-    const app = buildApp(loadConfig({}));
+    const app = buildApp(loadConfig({}), createDeps({ dbPath: ':memory:' }));
     const res = await app.inject({ method: 'GET', url: '/api/health' });
 
     expect(res.statusCode).toBe(200);
@@ -22,6 +23,7 @@ describe('GET /api/health', () => {
         GOOGLE_CLIENT_ID: '1234567890-abc.apps.googleusercontent.com',
         GOOGLE_CLIENT_SECRET: 'secret',
       }),
+      createDeps({ dbPath: ':memory:' }),
     );
     const res = await app.inject({ method: 'GET', url: '/api/health' });
 

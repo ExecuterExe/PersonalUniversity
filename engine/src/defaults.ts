@@ -1,3 +1,4 @@
+import { DEFAULT_POMODORO } from './timer';
 import type { Priority, Settings, TimeWindow } from './types';
 
 export const DAY_PARTS = {
@@ -39,5 +40,6 @@ export function defaultSettings(
     maxDailyMinutes: 180,
     maxWeeklyMinutes: 600,
     maxSessionsPerDay: 2,
+    pomodoro: { ...DEFAULT_POMODORO },
   };
 }

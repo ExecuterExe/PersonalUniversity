@@ -1,11 +1,12 @@
 import { ALLOWED_DURATIONS } from './defaults';
 import { WEEKDAY_ON } from './format';
 import { DAY, durationMinutes, localInfo, makeCalendar, type SemesterCalendar } from './time';
-import type { Instant, PlanState, Session, Weekday } from './types';
+import { DEFAULT_POMODORO, plannedFocusMinutes } from './timer';
+import type { Instant, PlanState, PomodoroSettings, Session, Weekday } from './types';
 
 export interface DisciplineStats {
   disciplineId: string;
-  /** Плановые минуты семестра: всё, что стояло в плане, кроме отменённого. */
+  /** Плановое чистое время учёбы (без перерывов Помодоро): всё, что стояло в плане, кроме отменённого. */
   plannedMinutes: number;
   /** Фактическое чистое время учёбы, включая внеплановые занятия. */
   actualMinutes: number;
@@ -19,9 +20,17 @@ export interface DisciplineStats {
 }
 
 const isPlannedKind = (s: Session) => s.origin !== 'unplanned' && s.status !== 'cancelled';
-const actualOf = (s: Session) => s.actualMinutes ?? durationMinutes(s);
+
+/** План и факт сравниваются в чистом времени учёбы — перерывы Помодоро не в счёт. */
+function minutesOf(state: PlanState) {
+  const pomodoro: PomodoroSettings = state.settings.pomodoro ?? DEFAULT_POMODORO;
+  const planned = (s: Session) => plannedFocusMinutes(durationMinutes(s), pomodoro);
+  const actual = (s: Session) => s.actualMinutes ?? planned(s);
+  return { planned, actual };
+}
 
 export function disciplineStats(state: PlanState): DisciplineStats[] {
+  const { planned: plannedOf, actual: actualOf } = minutesOf(state);
   const ids = new Set([
     ...state.disciplines.map((d) => d.id),
     ...state.sessions.map((s) => s.disciplineId),
@@ -29,7 +38,7 @@ export function disciplineStats(state: PlanState): DisciplineStats[] {
   return [...ids].map((id) => {
     const own = state.sessions.filter((s) => s.disciplineId === id);
     const planned = own.filter(isPlannedKind);
-    const plannedMinutes = planned.reduce((sum, s) => sum + durationMinutes(s), 0);
+    const plannedMinutes = planned.reduce((sum, s) => sum + plannedOf(s), 0);
     const actualMinutes = own
       .filter((s) => s.status === 'held')
       .reduce((sum, s) => sum + actualOf(s), 0);
@@ -71,9 +80,10 @@ export interface Forecast {
 
 /** Темп = сделанное / запланированное к текущему моменту; при том же темпе так закончится и семестр. */
 export function forecast(state: PlanState, now: Instant): Forecast {
+  const { planned: plannedOf, actual: actualOf } = minutesOf(state);
   const pace = (sessions: readonly Session[]) => {
     const due = sessions.filter((s) => isPlannedKind(s) && s.end <= now);
-    const planned = due.reduce((sum, s) => sum + durationMinutes(s), 0);
+    const planned = due.reduce((sum, s) => sum + plannedOf(s), 0);
     const actual = sessions
       .filter((s) => s.status === 'held' && s.end <= now)
       .reduce((sum, s) => sum + actualOf(s), 0);
@@ -89,7 +99,7 @@ export function forecast(state: PlanState, now: Instant): Forecast {
 export interface CalibrationSuggestion {
   disciplineId: string;
   currentMinutes: number;
-  /** Медиана фактического времени последних занятий. */
+  /** Медиана того, сколько длились последние занятия (без пауз, с перерывами). */
   medianActualMinutes: number;
   suggestedMinutes: number;
   sample: number;
@@ -115,7 +125,9 @@ export function calibrationSuggestions(state: PlanState): CalibrationSuggestion[
       .sort((a, b) => b.start - a.start)
       .slice(0, CALIBRATION_SAMPLE);
     if (recent.length < CALIBRATION_SAMPLE) continue;
-    const med = median(recent.map(actualOf));
+    const med = median(
+      recent.map((s) => s.elapsedMinutes ?? s.actualMinutes ?? durationMinutes(s)),
+    );
     if (med >= CALIBRATION_THRESHOLD * d.durationMinutes) continue;
     const suggested = ALLOWED_DURATIONS.find((m) => m >= med + CALIBRATION_HEADROOM);
     if (suggested === undefined || suggested >= d.durationMinutes) continue;

@@ -13,9 +13,9 @@ import { expandSkeleton } from './expand';
 import { formatHours } from './format';
 import { resolveConflictsAutomatically } from './moves';
 import { rhythmPenalty } from './rhythm';
-import { makeRuleContext } from './rules';
+import { checkPlacement, makeRuleContext, unaccepted } from './rules';
 import { isActiveAt, placeSkeleton, slotId } from './skeleton';
-import { localInfo } from './time';
+import { localInfo, MINUTE } from './time';
 import type { BusyEvent, Discipline, Frequency, Instant, PlanState, SkeletonSlot } from './types';
 
 export interface FrequencyChange {
@@ -318,7 +318,12 @@ export function makeBiweekly(state: PlanState, disciplineId: string, now: Instan
   const replacement = new Map(
     old.map((s) => [
       s.id,
-      { ...s, id: slotId(disciplineId, s.weekday, s.startMinute, fromWeek), parity, fromWeek },
+      {
+        ...s,
+        id: uniqueSlotId(state.skeleton, slotId(disciplineId, s.weekday, s.startMinute, fromWeek)),
+        parity,
+        fromWeek,
+      },
     ]),
   );
   const skeleton = state.skeleton
@@ -347,6 +352,89 @@ export function makeBiweekly(state: PlanState, disciplineId: string, now: Instan
     frequencyChanges: diffFrequencies(state.frequencies, frequencies),
     addedSessions: 0,
     removedSessions: removed,
+    conflicts: [],
+    compromises: [],
+  };
+}
+
+/** id, которого ещё нет в каркасе: при замене слота в ту же неделю базовый id совпал бы. */
+function uniqueSlotId(skeleton: readonly SkeletonSlot[], base: string): string {
+  let id = base;
+  for (let n = 2; skeleton.some((s) => s.id === id); n++) id = `${base}.v${n}`;
+  return id;
+}
+
+/**
+ * Новая длительность занятий дисциплины — например, после подсказки калибровки (раздел 10).
+ * Будущие занятия остаются на своих местах, меняется только конец. Если с новой длительностью
+ * какое-то занятие нарушило бы правила, ничего не меняется и сервис объясняет почему.
+ */
+export function changeDuration(
+  state: PlanState,
+  disciplineId: string,
+  minutes: number,
+  busy: readonly BusyEvent[],
+  now: Instant,
+): ChangeResult {
+  const before = computeBudget(
+    state.disciplines,
+    state.frequencies,
+    state.settings.maxWeeklyMinutes,
+  );
+  const disciplines = state.disciplines.map((d) =>
+    d.id === disciplineId ? { ...d, durationMinutes: minutes } : d,
+  );
+  const ctx = makeRuleContext(state.semester, state.settings, disciplines, busy);
+  const fromWeek = currentWeek(state, now);
+
+  let skeleton = [...state.skeleton];
+  const replaced = new Map<string, string>();
+  for (const s of state.skeleton) {
+    if (s.disciplineId !== disciplineId || !isActiveAt(s, fromWeek)) continue;
+    const id = uniqueSlotId(skeleton, slotId(disciplineId, s.weekday, s.startMinute, fromWeek));
+    replaced.set(s.id, id);
+    skeleton = skeleton
+      .map((x) => (x.id === s.id ? { ...x, toWeek: fromWeek } : x))
+      .concat({ ...s, id, durationMinutes: minutes, fromWeek });
+  }
+
+  const changed = new Set<string>();
+  const sessions = state.sessions.map((s) => {
+    if (s.disciplineId !== disciplineId || s.status !== 'planned' || s.start <= now) return s;
+    changed.add(s.id);
+    const slot = s.skeletonSlotId ? replaced.get(s.skeletonSlotId) : undefined;
+    return {
+      ...s,
+      end: s.start + minutes * MINUTE,
+      ...(slot ? { skeletonSlotId: slot } : {}),
+    };
+  });
+
+  const problems = sessions
+    .filter((s) => changed.has(s.id))
+    .flatMap((s) => unaccepted(checkPlacement(ctx, s, sessions), s.acceptedViolations));
+  const after = computeBudget(disciplines, state.frequencies, state.settings.maxWeeklyMinutes);
+  if (problems.length > 0) {
+    return {
+      ok: false,
+      before,
+      after,
+      frequencyChanges: [],
+      addedSessions: 0,
+      removedSessions: 0,
+      conflicts: [],
+      failure: `С новой длительностью не все занятия помещаются: ${problems[0]!.message}`,
+      compromises: [],
+    };
+  }
+  return {
+    ok: true,
+    before,
+    after,
+    state: { ...state, disciplines, skeleton, sessions },
+    frequencyChanges: [],
+    addedSessions: 0,
+    removedSessions: 0,
     conflicts: [],
     compromises: [],
   };

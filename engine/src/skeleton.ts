@@ -21,7 +21,7 @@ export function slotId(
   startMinute: number,
   fromWeek: number,
 ): string {
-  return `${disciplineId}/${weekday}/${startMinute}/${fromWeek}`;
+  return `${disciplineId}.${weekday}.${startMinute}.${fromWeek}`;
 }
 
 export function parityOverlaps(a?: 0 | 1, b?: 0 | 1): boolean {

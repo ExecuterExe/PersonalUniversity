@@ -21,7 +21,7 @@ export function expandSkeleton(
       );
       if (start <= earliest || end > cal.rangeEnd) continue;
       sessions.push({
-        id: `${slot.id}@${w}`,
+        id: `${slot.id}.w${w}`,
         disciplineId: slot.disciplineId,
         start,
         end,

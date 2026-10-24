@@ -23,6 +23,14 @@ export interface Discipline {
   extraWindows?: TimeWindow[];
 }
 
+export interface PomodoroSettings {
+  focusMinutes: number;
+  breakMinutes: number;
+  longBreakMinutes: number;
+  /** Длинный перерыв после стольких циклов фокуса. */
+  cyclesBeforeLongBreak: number;
+}
+
 export interface Settings {
   /** Часовой пояс IANA, например Europe/Moscow. */
   timezone: string;
@@ -35,6 +43,8 @@ export interface Settings {
   maxDailyMinutes: number;
   maxWeeklyMinutes: number;
   maxSessionsPerDay: number;
+  /** Нужен статистике: плановое чистое время учёбы — без перерывов. */
+  pomodoro?: PomodoroSettings;
 }
 
 export interface SemesterSpec {
@@ -51,6 +61,8 @@ export interface BusyEvent {
   title?: string;
   /** Общий id у всех повторений одного повторяющегося события. */
   recurringId?: string;
+  /** Не событие, а неудобное время: буфер вокруг не нужен. */
+  noBuffer?: boolean;
 }
 
 /** Занятий в неделю; 0.5 — раз в две недели. */
@@ -101,8 +113,12 @@ export interface Session {
   /** Где занятие стояло по каркасу, если его перенесли. */
   originalStart?: Instant;
   moveReason?: string;
-  /** Чистое время учёбы, для проведённых занятий. */
+  /** Чистое время учёбы (без перерывов и пауз), для проведённых занятий. */
   actualMinutes?: number;
+  /** Сколько длилось занятие без пауз, включая перерывы Помодоро, — для калибровки. */
+  elapsedMinutes?: number;
+  startedAt?: Instant;
+  finishedAt?: Instant;
   /** Длительность отличается от дисциплины по согласию пользователя. */
   customDuration?: boolean;
   /** Нарушения, которые пользователь подтвердил вручную. */

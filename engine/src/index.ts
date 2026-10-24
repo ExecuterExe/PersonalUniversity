@@ -4,7 +4,7 @@
  * Чистая логика: не обращается к базе, сети и системным часам — текущее время
  * передаётся снаружи. Правила и цели — в docs/methodology.md.
  */
-export const ENGINE_VERSION = '0.2.0';
+export const ENGINE_VERSION = '0.3.0';
 
 export * from './analytics';
 export * from './budget';
@@ -16,10 +16,12 @@ export * from './conflicts';
 export * from './defaults';
 export * from './expand';
 export * from './format';
+export * from './inconvenient';
 export * from './moves';
 export * from './rhythm';
 export * from './rules';
 export * from './skeleton';
 export * from './time';
+export * from './timer';
 export * from './types';
 export { BusyIndex } from './busy';

@@ -111,7 +111,9 @@ export function checkPlacement(
     const names = busy.map((e) => `«${e.title ?? 'занято'}»`).join(', ');
     violations.push({
       code: 'busy',
-      message: `Пересекается с ${names} с учётом буфера ${settings.bufferMinutes} мин`,
+      message: busy.every((e) => e.noBuffer)
+        ? `Попадает на неудобное время: ${names}`
+        : `Пересекается с ${names} с учётом буфера ${settings.bufferMinutes} мин`,
     });
   }
 

@@ -168,7 +168,7 @@ describe('пропуски и отработки', () => {
     const withMakeup = addMakeup(sessions, missedOne.id, options[0]!);
     const makeup = withMakeup.find((s) => s.origin === 'makeup')!;
     expect(makeup).toMatchObject({
-      id: `${missedOne.id}+makeup`,
+      id: `${missedOne.id}.makeup`,
       status: 'planned',
       originalStart: missedOne.start,
     });
