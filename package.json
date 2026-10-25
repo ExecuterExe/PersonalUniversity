@@ -21,7 +21,11 @@
     "format:check": "prettier --check .",
     "check": "npm run lint && npm run format:check && npm run typecheck && npm run test",
     "check:env": "npm run check:env -w @ou/server",
-    "simulate": "npm run simulate --silent -w @ou/engine --"
+    "simulate": "npm run simulate --silent -w @ou/engine --",
+    "app": "tsx server/src/system/launcher.ts open",
+    "app:stop": "tsx server/src/system/launcher.ts stop",
+    "app:install": "tsx server/src/system/launcher.ts install",
+    "app:uninstall": "tsx server/src/system/launcher.ts uninstall"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

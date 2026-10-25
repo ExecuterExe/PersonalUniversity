@@ -8,6 +8,7 @@ import {
   Settings,
   Sun,
 } from 'lucide-react';
+import { DateTime } from 'luxon';
 import { useCallback, useEffect, useState } from 'react';
 import { ColorsProvider } from './colors';
 import { RefreshContext, useApi, useHashRoute, useRefresh } from './hooks';
@@ -99,6 +100,11 @@ function Shell() {
     );
   }
 
+  // Часы компьютера в другом поясе (например, в поездке): говорим, по какому поясу всё в сервисе.
+  const service = DateTime.fromMillis(today.now, { zone: today.timezone });
+  const mine = DateTime.fromMillis(today.now);
+  const zoneMismatch = service.offset !== mine.offset;
+
   const semesterIds =
     today.semester?.disciplines.filter((d) => d.frequency !== null).map((d) => d.id) ?? [];
   const week = today.semester?.currentWeek;
@@ -136,9 +142,17 @@ function Shell() {
         <div
           className="stack"
           style={{
-            marginBottom: googleResult || google?.needsReauth || google?.lastSyncError ? 20 : 0,
+            marginBottom:
+              googleResult || google?.needsReauth || google?.lastSyncError || zoneMismatch ? 20 : 0,
           }}
         >
+          {zoneMismatch && (
+            <Alert tone="info">
+              Часы компьютера показывают {mine.toFormat('HH:mm')}, а расписание ведётся по поясу{' '}
+              {today.timezone} — там сейчас {service.toFormat('HH:mm')}. Все времена в сервисе — по
+              этому поясу; в Google Календаре занятия видны по местному времени.
+            </Alert>
+          )}
           {googleResult && <Alert tone={googleResult.tone}>{googleResult.text}</Alert>}
           {google?.needsReauth && (
             <Alert tone="warning">

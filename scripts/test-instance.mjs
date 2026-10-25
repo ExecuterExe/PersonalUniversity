@@ -13,6 +13,8 @@ const env = {
   SERVER_PORT: '4200',
   OU_DB_PATH: dbPath,
   APP_URL: 'http://localhost:5174',
+  // Ярлыки из настроек тестового экземпляра — во временную папку, а не на настоящий рабочий стол.
+  OU_SHORTCUT_DIR: join(tmpdir(), 'ou-test-shortcuts'),
 };
 const run = (args) => spawn('npm', args, { env, stdio: 'inherit', shell: true });
 run(['run', 'start', '-w', '@ou/server']);

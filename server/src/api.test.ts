@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { backupIfDue } from './domain/maintenance';
+import { pauseForSleep, pauseIfAway } from './domain/sessions';
 import {
   createDiscipline,
   msk,
@@ -430,5 +431,56 @@ describe('резервные копии', () => {
     expect(backupIfDue(t.deps, dir)).toBeNull();
     t.advance(24 * 60);
     expect(backupIfDue(t.deps, dir)).not.toBeNull();
+  });
+});
+
+describe('особые случаи занятия', () => {
+  it('сон компьютера: пауза с момента сна, можно продолжить или засчитать', async () => {
+    const t = testApp(SATURDAY_EVENING);
+    await userSemester(t);
+    const monday = await sessionAt(t, '2026-10-26T10:00');
+    t.setNow(msk('2026-10-26T10:00'));
+    await t.call('POST', `/api/sessions/${monday.id}/start`);
+
+    // Последняя отметка сервера — в 10:20, проснулись в 11:05.
+    t.setNow(msk('2026-10-26T11:05'));
+    pauseForSleep(t.deps, msk('2026-10-26T10:20'), msk('2026-10-26T11:05'));
+    const slept = (await t.call('GET', '/api/timer')).body;
+    expect(slept).toMatchObject({
+      paused: true,
+      activeMs: 20 * 60_000,
+      autoPause: { reason: 'sleep', from: msk('2026-10-26T10:20'), to: msk('2026-10-26T11:05') },
+    });
+
+    // «Я занимался — засчитать»: время сна идёт в учёбу.
+    const counted = (await t.call('POST', '/api/timer/resume', { countPaused: true })).body;
+    expect(counted).toMatchObject({ paused: false, activeMs: 65 * 60_000 });
+    expect(counted.autoPause).toBeUndefined();
+  });
+
+  it('закрытая страница: после конца занятия таймер встаёт, а не тикает до утра', async () => {
+    const t = testApp(SATURDAY_EVENING);
+    await userSemester(t);
+    const monday = await sessionAt(t, '2026-10-26T10:00');
+    t.setNow(msk('2026-10-26T10:00'));
+    await t.call('POST', `/api/sessions/${monday.id}/start`);
+    const lastSeen = msk('2026-10-26T10:05');
+
+    // Время занятия ещё идёт — страница могла закрыться случайно, таймер не трогаем.
+    t.setNow(msk('2026-10-26T11:00'));
+    pauseIfAway(t.deps, lastSeen, 10 * 60_000);
+    expect((await t.call('GET', '/api/timer')).body.paused).toBe(false);
+
+    // Утром: таймер остановился на конце занятия, 11:30.
+    t.setNow(msk('2026-10-27T08:00'));
+    pauseIfAway(t.deps, lastSeen, 10 * 60_000);
+    const away = (await t.call('GET', '/api/timer')).body;
+    expect(away).toMatchObject({
+      paused: true,
+      activeMs: 90 * 60_000,
+      autoPause: { reason: 'away', from: msk('2026-10-26T11:30') },
+    });
+    const finished = (await t.call('POST', '/api/timer/finish')).body;
+    expect(finished).toMatchObject({ focusMinutes: 75, activeMinutes: 90 });
   });
 });

@@ -1,10 +1,13 @@
 import {
+  autoPauseTimer,
   checkManualMove,
+  countPausedTime,
   DEFAULT_POMODORO,
   durationMinutes,
   finishTimer,
   MINUTE,
   pauseTimer,
+  plannedEndAt,
   resumeTimer,
   startTimer,
   timerView,
@@ -168,11 +171,40 @@ export function pause(deps: Deps): TimerView {
   return timerView(state, deps.now(), appSettings(deps.store).pomodoro);
 }
 
-export function resume(deps: Deps): TimerView {
+export const resumeInput = z.object({ countPaused: z.boolean().default(false) });
+
+/** Продолжить; `countPaused` — «я занимался — засчитать»: время паузы идёт в учёбу. */
+export function resume(deps: Deps, countPaused = false): TimerView {
   const t = requireTimer(deps);
-  const state = resumeTimer(t.state, deps.now());
+  const state = countPaused ? countPausedTime(t.state) : resumeTimer(t.state, deps.now());
   deps.store.setTimer({ ...t, state });
   return timerView(state, deps.now(), appSettings(deps.store).pomodoro);
+}
+
+/**
+ * Компьютер спал или был выключен с `from` до `to`: таймер встаёт на паузу с момента,
+ * когда сервис перестал работать, — сон не считается учёбой, пока ты сам не скажешь иначе.
+ */
+export function pauseForSleep(deps: Deps, from: Instant, to: Instant): void {
+  const t = deps.store.getTimer();
+  if (!t || t.state.pausedAt !== undefined) return;
+  deps.store.setTimer({ ...t, state: autoPauseTimer(t.state, 'sleep', from, to) });
+}
+
+/**
+ * Время занятия вышло, а страница давно закрыта (`lastSeen` — последний запрос от неё):
+ * таймер встаёт на конце занятия, а не тикает до утра.
+ */
+export function pauseIfAway(deps: Deps, lastSeen: Instant, awayMs: number): void {
+  const t = deps.store.getTimer();
+  if (!t || t.state.pausedAt !== undefined) return;
+  const now = deps.now();
+  const end = plannedEndAt(t.state);
+  if (now <= end || now - lastSeen < awayMs) return;
+  deps.store.setTimer({
+    ...t,
+    state: autoPauseTimer(t.state, 'away', Math.max(lastSeen, end)),
+  });
 }
 
 export interface FinishResult {

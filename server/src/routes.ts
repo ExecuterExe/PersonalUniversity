@@ -44,6 +44,7 @@ import {
   moveSession,
   pause,
   resume,
+  resumeInput,
   saveSummary,
   schedule,
   scheduleQuery,
@@ -153,7 +154,9 @@ export function registerRoutes(app: FastifyInstance, deps: Deps): void {
   // Таймер идущего занятия
   app.get('/api/timer', () => currentTimer(deps));
   app.post('/api/timer/pause', () => pause(deps));
-  app.post('/api/timer/resume', () => resume(deps));
+  app.post('/api/timer/resume', (req) =>
+    resume(deps, resumeInput.parse(req.body ?? {}).countPaused),
+  );
   app.post('/api/timer/finish', () => finish(deps));
 
   // Решения: вопросы сервиса

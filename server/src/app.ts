@@ -6,9 +6,31 @@ import type { Deps } from './domain/context';
 import { AppError } from './errors';
 import { registerGoogleRoutes } from './google/routes';
 import { registerRoutes } from './routes';
+import { registerSystemRoutes } from './system/routes';
+import { registerWeb } from './web';
 
-export function buildApp(config: Config, deps: Deps) {
+/** Страницы самого сервиса: localhost на любом порту (рабочий режим, разработка, тестовый экземпляр). */
+function isOwnOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+export function buildApp(config: Config, deps: Deps, options: { webDir?: string } = {}) {
   const app = Fastify();
+
+  // Сервис работает в фоне постоянно, поэтому чужая открытая страница не должна
+  // ничего менять через него: изменения принимаются только со страниц самого сервиса.
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    const origin = req.headers.origin;
+    if (origin !== undefined && !isOwnOrigin(origin)) {
+      return reply.status(403).send({ error: 'Запрос с чужой страницы отклонён' });
+    }
+  });
 
   app.setErrorHandler((error: FastifyError | AppError | ZodError, request, reply) => {
     if (error instanceof AppError) {
@@ -32,6 +54,9 @@ export function buildApp(config: Config, deps: Deps) {
     status: 'ok',
     engineVersion: ENGINE_VERSION,
     googleConfigured: checkGoogleConfig(config).length === 0,
+    web: options.webDir !== undefined,
+    // В рабочем режиме сервер работает в фоне: по номеру процесса его останавливает `npm run app:stop`.
+    ...(options.webDir ? { pid: process.pid } : {}),
   }));
 
   // После любого изменения план отправляется в Google (с небольшой задержкой — см. index.ts).
@@ -49,5 +74,7 @@ export function buildApp(config: Config, deps: Deps) {
 
   registerRoutes(app, deps);
   registerGoogleRoutes(app, deps, config);
+  registerSystemRoutes(app);
+  if (options.webDir) registerWeb(app, options.webDir);
   return app;
 }

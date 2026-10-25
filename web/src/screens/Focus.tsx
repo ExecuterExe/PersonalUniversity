@@ -17,7 +17,7 @@ import {
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useColor } from '../colors';
-import { countdown } from '../format';
+import { countdown, local } from '../format';
 import { useAction, useApi, useNow, useRefresh } from '../hooks';
 import { ambience, loadPrefs, savePrefs, SOUNDS, type SoundId, type SoundPrefs } from '../sounds';
 import type { AppSettings, SessionDetails, TimerView } from '../types';
@@ -279,6 +279,78 @@ function SoundMixer({ phase, paused }: { phase: TimerView['phase']; paused: bool
   );
 }
 
+/**
+ * Пока занятие идёт, экран не гаснет, а компьютер не засыпает от бездействия —
+ * если браузер это умеет. На паузе — как обычно.
+ */
+function useWakeLock(active: boolean) {
+  useEffect(() => {
+    if (!active || !('wakeLock' in navigator)) return;
+    let lock: WakeLockSentinel | null = null;
+    let cancelled = false;
+    // Браузер снимает блокировку, когда вкладку прячут, — берём заново, когда она снова видна.
+    const acquire = () => {
+      if (document.visibilityState !== 'visible') return;
+      navigator.wakeLock
+        .request('screen')
+        .then((next) => {
+          if (cancelled) void next.release();
+          else lock = next;
+        })
+        .catch(() => undefined);
+    };
+    acquire();
+    document.addEventListener('visibilitychange', acquire);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', acquire);
+      void lock?.release();
+    };
+  }, [active]);
+}
+
+/** Почему таймер стоит, если его остановил сервис, и что с этим сделать. */
+function AutoPauseNote({
+  pause,
+  zone,
+  busy,
+  onCount,
+}: {
+  pause: NonNullable<TimerView['autoPause']>;
+  zone: string;
+  busy: boolean;
+  onCount: () => void;
+}) {
+  const today = local(useNow(60_000), zone).toISODate();
+  const at = (t: number) => {
+    const dt = local(t, zone).setLocale('ru');
+    return dt.toISODate() === today ? dt.toFormat('HH:mm') : dt.toFormat('d MMMM, HH:mm');
+  };
+  if (pause.reason === 'away') {
+    return (
+      <Alert tone="info">
+        Время занятия вышло, когда страница была закрыта, — таймер остановлен в {at(pause.from)}.
+        Можно завершить занятие или продолжить.
+      </Alert>
+    );
+  }
+  return (
+    <Alert tone="warning">
+      <div className="stack" style={{ gap: 8 }}>
+        <span>
+          Компьютер спал или был выключен с {at(pause.from)}
+          {pause.to ? ` до ${at(pause.to)}` : ''} — это время не засчитано в учёбу.
+        </span>
+        <div>
+          <Button variant="secondary" size="sm" disabled={busy} onClick={onCount}>
+            Я занимался — засчитать
+          </Button>
+        </div>
+      </div>
+    </Alert>
+  );
+}
+
 export function FocusView({ timer }: { timer: TimerView }) {
   const { data: details, error } = useApi<SessionDetails>(`/api/sessions/${timer.sessionId}`);
   const { data: settings } = useApi<AppSettings>('/api/settings');
@@ -289,6 +361,7 @@ export function FocusView({ timer }: { timer: TimerView }) {
     ? Math.ceil(timer.plannedMs / ((pomodoro.focusMinutes + pomodoro.breakMinutes) * 60_000))
     : timer.cycle;
   const key = `${timer.activeMs}-${timer.paused}`;
+  useWakeLock(!timer.paused);
 
   const finish = () => {
     const early = timer.plannedMs - timer.activeMs > 60_000;
@@ -304,6 +377,14 @@ export function FocusView({ timer }: { timer: TimerView }) {
           <span className="dot" style={{ background: color.accent, width: 12, height: 12 }} />
           <h2 style={{ fontSize: 22 }}>{details?.session.disciplineName ?? 'Занятие'}</h2>
         </div>
+        {timer.autoPause && settings && (
+          <AutoPauseNote
+            pause={timer.autoPause}
+            zone={settings.timezone}
+            busy={busy}
+            onCount={() => void run(() => api.post('/api/timer/resume', { countPaused: true }))}
+          />
+        )}
         <PhaseRing key={key} view={timer} totalCycles={totalCycles} />
         <SessionProgress key={`p-${key}`} view={timer} />
         <div className="row">

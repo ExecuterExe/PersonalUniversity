@@ -9,6 +9,17 @@ export const DEFAULT_POMODORO: PomodoroSettings = {
 };
 
 /**
+ * Пауза, которую поставил сервис, а не человек: компьютер спал или был выключен (`sleep`),
+ * время занятия вышло, а страница давно закрыта (`away`).
+ */
+export interface AutoPause {
+  reason: 'sleep' | 'away';
+  from: Instant;
+  /** Когда компьютер проснулся — для `sleep`. */
+  to?: Instant;
+}
+
+/**
  * Состояние идущего занятия. Время считается только по отметкам, поэтому
  * перезагрузка страницы или закрытый браузер ничего не сбивают.
  */
@@ -20,6 +31,7 @@ export interface TimerState {
   pausedAt?: Instant;
   /** Сколько уже простояло на паузе до текущей паузы. */
   pausedMs: number;
+  autoPause?: AutoPause;
 }
 
 export type PhaseKind = 'focus' | 'break' | 'long-break';
@@ -40,6 +52,8 @@ export interface TimerView {
   /** До конца запланированного времени; 0 — время вышло. */
   remainingMs: number;
   overtime: boolean;
+  /** Почему таймер стоит, если его остановил сервис. */
+  autoPause?: AutoPause;
 }
 
 export function startTimer(sessionId: string, plannedMinutes: number, now: Instant): TimerState {
@@ -52,8 +66,41 @@ export function pauseTimer(t: TimerState, now: Instant): TimerState {
 
 export function resumeTimer(t: TimerState, now: Instant): TimerState {
   if (t.pausedAt === undefined) return t;
-  const { pausedAt, ...rest } = t;
-  return { ...rest, pausedMs: t.pausedMs + Math.max(0, now - pausedAt) };
+  const next = withoutPause(t);
+  return { ...next, pausedMs: t.pausedMs + Math.max(0, now - t.pausedAt) };
+}
+
+function withoutPause(t: TimerState): TimerState {
+  const next = { ...t };
+  delete next.pausedAt;
+  delete next.autoPause;
+  return next;
+}
+
+/** «Я занимался — засчитать»: снять паузу так, будто её не было, — всё это время идёт в учёбу. */
+export function countPausedTime(t: TimerState): TimerState {
+  return withoutPause(t);
+}
+
+/** Пауза задним числом — с момента, когда сервис перестал видеть занятие. */
+export function autoPauseTimer(
+  t: TimerState,
+  reason: AutoPause['reason'],
+  from: Instant,
+  to?: Instant,
+): TimerState {
+  if (t.pausedAt !== undefined) return t;
+  const at = Math.max(from, t.startedAt);
+  return {
+    ...t,
+    pausedAt: at,
+    autoPause: { reason, from: at, ...(to === undefined ? {} : { to }) },
+  };
+}
+
+/** Когда закончится запланированное время, если не ставить на паузу. */
+export function plannedEndAt(t: TimerState): Instant {
+  return t.startedAt + t.pausedMs + t.plannedMinutes * MINUTE;
 }
 
 export function activeMs(t: TimerState, now: Instant): number {
@@ -114,6 +161,7 @@ export function timerView(
     plannedMs,
     remainingMs: Math.max(0, plannedMs - active),
     overtime: active > plannedMs,
+    ...(t.autoPause && t.pausedAt !== undefined ? { autoPause: t.autoPause } : {}),
   };
 }
 

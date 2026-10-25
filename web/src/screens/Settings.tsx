@@ -7,6 +7,7 @@ import {
   Gauge,
   LogIn,
   Plus,
+  Power,
   RefreshCw,
   Save,
   Timer,
@@ -19,7 +20,7 @@ import { api } from '../api';
 import { WeekdayPicker, WindowsEditor } from '../components';
 import { inputToMinutes, minutesToInput, WEEKDAYS } from '../format';
 import { useAction, useApi } from '../hooks';
-import type { AppSettings, GoogleCalendar, GoogleStatus } from '../types';
+import type { AppSettings, GoogleCalendar, GoogleStatus, ShortcutsStatus } from '../types';
 import { Alert, Badge, Button, Card, ErrorText, Field, Loading, PageHeader } from '../ui';
 
 const hours = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
@@ -409,6 +410,67 @@ export function GooglePanel() {
   );
 }
 
+function ShortcutOption({
+  on,
+  disabled,
+  title,
+  hint,
+  onChange,
+}: {
+  on: boolean;
+  disabled: boolean;
+  title: string;
+  hint: string;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <label className="option" style={{ cursor: disabled ? 'default' : 'pointer' }}>
+      <input
+        type="checkbox"
+        checked={on}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ width: 17, height: 17, accentColor: 'var(--primary)' }}
+      />
+      <span className="grow">
+        <span className="title">{title}</span>
+        <span className="sub">{hint}</span>
+      </span>
+    </label>
+  );
+}
+
+/** Ярлык и автозапуск: сервис сам открывается на «Сегодня». Напоминаний при этом нет. */
+function LaunchPanel() {
+  const { data, error } = useApi<ShortcutsStatus>('/api/system/shortcuts');
+  const { run, error: actionError, busy } = useAction();
+  if (!data) return <Loading error={error} height={80} />;
+  if (!data.supported) {
+    return <p className="faint">Ярлык и автозапуск доступны только в Windows.</p>;
+  }
+  const set = (patch: Partial<Pick<ShortcutsStatus, 'desktop' | 'autostart'>>) =>
+    void run(() => api.put<ShortcutsStatus>('/api/system/shortcuts', patch));
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <ShortcutOption
+        on={data.desktop}
+        disabled={busy}
+        title="Ярлык на рабочем столе"
+        hint="Запускает сервис, если он не работает, и открывает «Сегодня»"
+        onChange={(desktop) => set({ desktop })}
+      />
+      <ShortcutOption
+        on={data.autostart}
+        disabled={busy}
+        title="Открывать при входе в Windows"
+        hint="Включил компьютер — сервис сам открывается на «Сегодня». Без напоминаний и уведомлений"
+        onChange={(autostart) => set({ autostart })}
+      />
+      <ErrorText error={actionError} />
+    </div>
+  );
+}
+
 export function SettingsScreen() {
   return (
     <>
@@ -419,6 +481,9 @@ export function SettingsScreen() {
         </Card>
         <Card title="Google Календарь" icon={<CalendarDays size={19} color="var(--primary)" />}>
           <GooglePanel />
+        </Card>
+        <Card title="Запуск" icon={<Power size={19} color="var(--primary)" />}>
+          <LaunchPanel />
         </Card>
         <Card title="Итоги занятий" icon={<Download size={19} color="var(--violet)" />}>
           <div className="row">

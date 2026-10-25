@@ -52,7 +52,8 @@
 | `POST /sessions/:id/move` | Ручной перенос: `start`; при нарушениях — 409 со списком, `confirm: true` — применить |
 | `POST /sessions/:id/skip` | Пропустить заранее |
 | `POST /sessions/:id/summary` | Итог: `keyConcepts` и/или `retelling`, `continueFrom` |
-| `GET /timer`, `POST /timer/pause`, `/resume`, `/finish` | Таймер Помодоро |
+| `GET /timer`, `POST /timer/pause`, `/resume`, `/finish` | Таймер Помодоро; `autoPause` — почему стоит, если остановил сервис (`sleep`, `away`) |
+| `POST /timer/resume` с `{ "countPaused": true }` | «Я занимался — засчитать»: время паузы идёт в учёбу |
 
 ## Решения — вопросы сервиса
 
@@ -67,7 +68,10 @@
 | Запрос | Что делает |
 |---|---|
 | `GET /export/summaries[?format=json]` | Все итоги занятий (Markdown по умолчанию) |
-| `GET /health` | Сервер жив, версия движка, есть ли ключи Google |
+| `GET /health` | Сервер жив, версия движка, есть ли ключи Google; `web` — рабочий режим (сервер отдаёт интерфейс), `pid` — номер процесса в нём |
+| `GET /system/shortcuts`, `PUT /system/shortcuts` | Ярлык на рабочем столе и автозапуск с Windows: `{ "desktop": true, "autostart": false }` |
+
+Запросы, которые что-то меняют, принимаются только со страниц самого сервиса (`localhost`): с чужих сайтов — 403.
 
 ## Google Календарь
 

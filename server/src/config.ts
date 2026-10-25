@@ -5,6 +5,8 @@ export interface Config {
   port: number;
   /** Куда вернуть браузер после входа через Google. */
   appUrl: string;
+  /** Рабочий режим: сервер сам отдаёт собранный интерфейс (запуск ярлыком). */
+  serveWeb: boolean;
   google: {
     clientId: string;
     clientSecret: string;
@@ -25,9 +27,12 @@ export function readEnvFile(path: string = ENV_PATH): boolean {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // Не общий PORT: его выставляют многие инструменты запуска, и сервер занял бы чужой порт.
   const port = env.SERVER_PORT ? Number(env.SERVER_PORT) : DEFAULT_PORT;
+  const serveWeb = env.OU_SERVE_WEB === '1';
   return {
     port,
-    appUrl: env.APP_URL || 'http://localhost:5173',
+    // В рабочем режиме интерфейс живёт на том же адресе, что и сервер, — туда и возвращаемся.
+    appUrl: serveWeb ? `http://localhost:${port}` : env.APP_URL || 'http://localhost:5173',
+    serveWeb,
     google: {
       clientId: env.GOOGLE_CLIENT_ID?.trim() ?? '',
       clientSecret: env.GOOGLE_CLIENT_SECRET?.trim() ?? '',

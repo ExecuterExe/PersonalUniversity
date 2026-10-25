@@ -217,3 +217,10 @@ export interface GoogleCalendar {
   usable: boolean;
   selected: boolean;
 }
+
+/** Ярлык на рабочем столе и автозапуск с Windows. */
+export interface ShortcutsStatus {
+  supported: boolean;
+  desktop: boolean;
+  autostart: boolean;
+}

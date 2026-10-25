@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { MINUTE } from './time';
 import {
+  autoPauseTimer,
+  countPausedTime,
   finishTimer,
   pauseTimer,
+  plannedEndAt,
   plannedFocusMinutes,
   resumeTimer,
   startTimer,
@@ -72,5 +75,41 @@ describe('таймер Помодоро', () => {
     };
     expect(plannedFocusMinutes(90, custom)).toBe(80);
     expect(timerView(startTimer('s', 90, T0), at(55), custom)).toMatchObject({ phase: 'break' });
+  });
+});
+
+describe('пауза, которую ставит сервис', () => {
+  it('сон компьютера не идёт в учёбу, а причина видна, пока таймер стоит', () => {
+    let t = startTimer('s1', 90, T0);
+    t = autoPauseTimer(t, 'sleep', at(20), at(65));
+    expect(timerView(t, at(65))).toMatchObject({
+      paused: true,
+      activeMs: 20 * MINUTE,
+      autoPause: { reason: 'sleep', from: at(20), to: at(65) },
+    });
+    t = resumeTimer(t, at(66));
+    const view = timerView(t, at(70));
+    expect(view).toMatchObject({ paused: false, activeMs: 24 * MINUTE });
+    expect(view.autoPause).toBeUndefined();
+  });
+
+  it('«Я занимался — засчитать» возвращает время паузы в учёбу', () => {
+    let t = startTimer('s1', 90, T0);
+    t = autoPauseTimer(t, 'sleep', at(20), at(65));
+    t = countPausedTime(t);
+    expect(timerView(t, at(70))).toMatchObject({ paused: false, activeMs: 70 * MINUTE });
+  });
+
+  it('не перекрывает паузу, которую поставил человек, и не уходит раньше начала', () => {
+    const paused = pauseTimer(startTimer('s1', 90, T0), at(10));
+    expect(autoPauseTimer(paused, 'sleep', at(30))).toBe(paused);
+    const early = autoPauseTimer(startTimer('s1', 90, T0), 'sleep', at(-30));
+    expect(early.pausedAt).toBe(T0);
+  });
+
+  it('знает, когда закончится запланированное время с учётом пауз', () => {
+    let t = startTimer('s1', 90, T0);
+    t = resumeTimer(pauseTimer(t, at(10)), at(25));
+    expect(plannedEndAt(t)).toBe(at(105));
   });
 });
