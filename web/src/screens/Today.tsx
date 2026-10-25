@@ -1,173 +1,113 @@
-import { useEffect, useState } from 'react';
+import { plural, SESSION_FORMS } from '@ou/engine';
+import { DateTime } from 'luxon';
+import {
+  ArrowRight,
+  Brain,
+  Flame,
+  Inbox,
+  Layers,
+  NotebookPen,
+  Play,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Zap,
+} from 'lucide-react';
+import { useState } from 'react';
 import { api } from '../api';
-import { ErrorText, Loading } from '../components';
-import { countdown, formatDuration, ORIGIN, range, STATUS, time } from '../format';
-import { useAction, useApi, useNow, useRefresh } from '../hooks';
-import type { SessionDetails, SessionView, TimerView, Today } from '../types';
+import { useAccent, useColor } from '../colors';
+import { formatDuration, formatPercent, local, ORIGIN, STATUS, time } from '../format';
+import { useAction, useApi } from '../hooks';
+import type { SessionDetails, SessionView, Stats, Today } from '../types';
+import { Alert, Badge, Button, Card, Empty, ErrorText, Field, PageHeader } from '../ui';
+import { FocusView } from './Focus';
 
-const PHASE = { focus: 'Фокус', break: 'Перерыв', 'long-break': 'Длинный перерыв' } as const;
+const EARLY_START_MS = 30 * 60_000;
 
-/** Короткий сигнал при смене фазы Помодоро. */
-function beep() {
-  try {
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.frequency.value = 880;
-    gain.gain.value = 0.15;
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.4);
-  } catch {
-    // Без звука — не страшно.
-  }
+function greeting(now: number, zone: string): string {
+  const hour = local(now, zone).hour;
+  if (hour >= 5 && hour < 12) return 'Доброе утро';
+  if (hour >= 12 && hour < 18) return 'Добрый день';
+  if (hour >= 18) return 'Добрый вечер';
+  return 'Доброй ночи';
 }
 
-/** Какую смену фазы уже отметили сигналом — общая на все перерисовки таймера. */
-let signalledPhase = '';
-
-/** Таймер считает сам между запросами; новые данные с сервера — новый экземпляр (см. key ниже). */
-function TimerPanel({ view }: { view: TimerView }) {
-  const { refresh } = useRefresh();
-  const { run, error, busy } = useAction();
-  const [base] = useState(() => ({ view, at: Date.now() }));
-  const now = useNow(500);
-
-  const v = base.view;
-  const elapsed = v.paused ? 0 : now - base.at;
-  const phaseLeft = v.phaseLengthMs - v.phaseElapsedMs - elapsed;
-  const remaining = Math.max(0, v.plannedMs - v.activeMs - elapsed);
-  const focus = v.focusMs + (v.phase === 'focus' && !v.paused ? elapsed : 0);
-
-  useEffect(() => {
-    const key = `${v.sessionId}-${v.cycle}-${v.phase}`;
-    if (phaseLeft <= 0 && !v.paused && signalledPhase !== key) {
-      signalledPhase = key;
-      beep();
-      refresh();
-    }
-  }, [phaseLeft, v.sessionId, v.cycle, v.phase, v.paused, refresh]);
-
-  useEffect(() => {
-    document.title = `${countdown(phaseLeft)} · ${PHASE[v.phase]}`;
-    return () => {
-      document.title = 'Мой университет';
-    };
-  }, [phaseLeft, v.phase]);
-
-  const finish = () => {
-    const early = remaining > 60_000;
-    if (early && !confirm('Завершить раньше времени? Запишется, сколько было на самом деле.'))
-      return;
-    void run(() => api.post('/api/timer/finish'));
-  };
-
-  return (
-    <div className="stack">
-      <div className="muted">
-        {PHASE[v.phase]} · цикл {v.cycle}
-        {v.paused && ' · пауза'}
-      </div>
-      <div className="timer">{countdown(phaseLeft)}</div>
-      <div className="muted">
-        Чистая учёба: {Math.floor(focus / 60_000)} мин ·{' '}
-        {remaining > 0 ? `до конца занятия ${countdown(remaining)}` : 'время занятия вышло'}
-      </div>
-      <div className="row">
-        {v.paused ? (
-          <button disabled={busy} onClick={() => void run(() => api.post('/api/timer/resume'))}>
-            Продолжить
-          </button>
-        ) : (
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={() => void run(() => api.post('/api/timer/pause'))}
-          >
-            Пауза
-          </button>
-        )}
-        <button className={remaining > 0 ? 'danger' : ''} disabled={busy} onClick={finish}>
-          Завершить
-        </button>
-      </div>
-      <ErrorText error={error} />
-    </div>
-  );
+/** «через 25 мин», «через 2 ч 10 мин», «завтра в 10:00», «пн 2 ноября в 10:00» */
+function when(start: number, now: number, zone: string): string {
+  const s = local(start, zone).setLocale('ru');
+  const n = local(now, zone);
+  const minutes = Math.round((start - now) / 60_000);
+  if (minutes <= 0) return 'сейчас';
+  if (s.hasSame(n, 'day')) return `через ${formatDuration(minutes)}`;
+  if (s.hasSame(n.plus({ days: 1 }), 'day')) return `завтра в ${s.toFormat('HH:mm')}`;
+  return `${s.toFormat('cccc, d MMMM')} в ${s.toFormat('HH:mm')}`;
 }
 
-function SessionInProgress({ timer }: { timer: TimerView }) {
-  const { data, error } = useApi<SessionDetails>(`/api/sessions/${timer.sessionId}`);
-  return (
-    <section>
-      <h2>Сейчас: {data?.session.disciplineName ?? '…'}</h2>
-      <TimerPanel key={`${timer.activeMs}-${timer.paused}`} view={timer} />
-      {!data ? (
-        <Loading error={error} />
-      ) : (
-        <div className="stack">
-          {data.continueHint && <p className="warning">С чего продолжить: {data.continueHint}</p>}
-          <p className="muted">Цель: {data.goal}</p>
-          {data.sources.length > 0 && (
-            <>
-              <h3>Источники</h3>
-              <ul>
-                {data.sources.map((s) => (
-                  <li key={s.id}>
-                    {s.url ? (
-                      <a href={s.url} target="_blank" rel="noreferrer">
-                        {s.title}
-                      </a>
-                    ) : (
-                      s.title
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
+const STATUS_TONE: Record<SessionView['status'], 'primary' | 'success' | 'danger' | undefined> = {
+  planned: 'primary',
+  held: 'success',
+  missed: 'danger',
+  skipped: undefined,
+  cancelled: undefined,
+};
 
 /** Итог занятия: без него следующее не начнётся (методология, раздел 8). */
-export function SummaryForm({ session, zone }: { session: SessionView; zone: string }) {
+export function SummaryCard({ session, zone }: { session: SessionView; zone: string }) {
   const [keyConcepts, setKeyConcepts] = useState('');
   const [retelling, setRetelling] = useState('');
   const [continueFrom, setContinueFrom] = useState('');
   const { run, error, busy } = useAction();
+  const color = useColor(session.disciplineId);
   return (
-    <section>
-      <h2>Итог: {session.disciplineName}</h2>
-      <p className="muted">
-        {range(session.start, session.end, zone)}
-        {session.actualMinutes !== undefined &&
-          ` · чистая учёба ${formatDuration(session.actualMinutes)}`}
-      </p>
-      <p className="warning">Сначала попробуй вспомнить, не заглядывая в материалы.</p>
+    <Card
+      title={`Итог: ${session.disciplineName}`}
+      icon={<NotebookPen size={20} color={color.accent} />}
+      action={
+        session.actualMinutes !== undefined && (
+          <Badge tone="success">чистая учёба {formatDuration(session.actualMinutes)}</Badge>
+        )
+      }
+    >
       <div className="stack">
-        <label>
-          Ключевые понятия
-          <textarea value={keyConcepts} onChange={(e) => setKeyConcepts(e.target.value)} />
-        </label>
-        <label>
-          Короткий пересказ
-          <textarea value={retelling} onChange={(e) => setRetelling(e.target.value)} />
-        </label>
-        <p className="muted">Достаточно заполнить одно из двух.</p>
-        <label>
-          С чего продолжить в следующий раз (необязательно)
+        <p className="faint">
+          {local(session.start, zone).setLocale('ru').toFormat('cccc, d MMMM')} ·{' '}
+          {time(session.start, zone)}–{time(session.end, zone)}
+        </p>
+        <Alert tone="info">
+          Сначала попробуй вспомнить, не заглядывая в материалы, — так знания закрепляются лучше
+          всего.
+        </Alert>
+        <div className="grid-2">
+          <Field label="Ключевые понятия" hint="Списком, как вспоминается">
+            <textarea
+              className="textarea"
+              value={keyConcepts}
+              onChange={(e) => setKeyConcepts(e.target.value)}
+            />
+          </Field>
+          <Field label="Короткий пересказ" hint="Своими словами, пара абзацев">
+            <textarea
+              className="textarea"
+              value={retelling}
+              onChange={(e) => setRetelling(e.target.value)}
+            />
+          </Field>
+        </div>
+        <Field
+          label="С чего продолжить в следующий раз"
+          hint="Необязательно — покажется перед следующим занятием"
+        >
           <input
+            className="input"
             value={continueFrom}
-            onChange={(e) => setContinueFrom(e.target.value)}
             placeholder="Например: глава 3, раздел о сигналах"
+            onChange={(e) => setContinueFrom(e.target.value)}
           />
-        </label>
-        <div>
-          <button
-            disabled={busy}
+        </Field>
+        <div className="row">
+          <Button
+            icon={<Sparkles size={17} />}
+            disabled={busy || (!keyConcepts.trim() && !retelling.trim())}
             onClick={() =>
               void run(() =>
                 api.post(`/api/sessions/${session.id}/summary`, {
@@ -179,46 +119,106 @@ export function SummaryForm({ session, zone }: { session: SessionView; zone: str
             }
           >
             Записать итог
-          </button>
+          </Button>
+          <span className="faint">Достаточно одного из двух полей.</span>
         </div>
         <ErrorText error={error} />
       </div>
-    </section>
+    </Card>
   );
 }
 
-function SessionRow({ s, today }: { s: SessionView; today: Today }) {
+/** Главное на экране: следующее занятие и кнопка «Начать». */
+function NextHero({ session, today }: { session: SessionView; today: Today }) {
+  const { data: details } = useApi<SessionDetails>(`/api/sessions/${session.id}`);
   const { run, error, busy } = useAction();
   const zone = today.timezone;
   const startable =
-    s.status === 'planned' && s.end > today.now && !today.timer && !today.pendingSummary;
+    today.now >= session.start - EARLY_START_MS && today.now < session.end && !today.pendingSummary;
+  const hint = today.continueHints[session.disciplineId];
   return (
-    <tr>
-      <td>
-        {time(s.start, zone)}–{time(s.end, zone)}
-      </td>
-      <td>
-        {s.disciplineName}
-        {today.continueHints[s.disciplineId] && s.status === 'planned' && (
-          <div className="muted">С чего продолжить: {today.continueHints[s.disciplineId]}</div>
-        )}
-      </td>
-      <td>
-        {STATUS[s.status]}
-        {ORIGIN[s.origin] && <div className="muted">{ORIGIN[s.origin]}</div>}
-      </td>
-      <td>
-        {startable && (
-          <button
+    <div className="hero">
+      <div className="eyebrow">
+        {startable
+          ? 'Пора заниматься'
+          : `Следующее занятие · ${when(session.start, today.now, zone)}`}
+      </div>
+      <h2>{session.disciplineName}</h2>
+      <div className="meta">
+        {local(session.start, zone).setLocale('ru').toFormat('cccc, d MMMM')} ·{' '}
+        {time(session.start, zone)}–{time(session.end, zone)} ·{' '}
+        {formatDuration(Math.round((session.end - session.start) / 60_000))}
+      </div>
+      {details?.goal && (
+        <div className="meta small" style={{ marginTop: 6 }}>
+          Цель: {details.goal}
+        </div>
+      )}
+      {hint && (
+        <div className="hint">
+          <strong>С чего продолжить:</strong> {hint}
+        </div>
+      )}
+      <div className="row" style={{ marginTop: 18 }}>
+        {startable ? (
+          <Button
+            size="lg"
+            icon={<Play size={18} />}
             disabled={busy}
-            onClick={() => void run(() => api.post(`/api/sessions/${s.id}/start`))}
+            onClick={() => void run(() => api.post(`/api/sessions/${session.id}/start`))}
           >
-            Начать
-          </button>
+            Начать занятие
+          </Button>
+        ) : (
+          <span className="small" style={{ opacity: 0.85 }}>
+            Начать можно за 30 минут до начала
+          </span>
         )}
+      </div>
+      {error && (
+        <p className="small" style={{ marginTop: 10 }}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function LessonRow({ s, today }: { s: SessionView; today: Today }) {
+  const style = useAccent(s.disciplineId);
+  const zone = today.timezone;
+  const { run, error, busy } = useAction();
+  const startable =
+    s.status === 'planned' &&
+    today.now >= s.start - EARLY_START_MS &&
+    s.end > today.now &&
+    !today.timer &&
+    !today.pendingSummary;
+  return (
+    <div
+      className={`lesson ${s.status === 'held' ? 'done' : ''} ${s.status === 'missed' || s.status === 'skipped' ? 'off' : ''}`}
+      style={style}
+    >
+      <span className="time">
+        {time(s.start, zone)}–{time(s.end, zone)}
+      </span>
+      <div className="grow">
+        <strong>{s.disciplineName}</strong>
+        {ORIGIN[s.origin] && <div className="faint">{ORIGIN[s.origin]}</div>}
         <ErrorText error={error} />
-      </td>
-    </tr>
+      </div>
+      <Badge tone={STATUS_TONE[s.status]}>{STATUS[s.status]}</Badge>
+      {startable && (
+        <Button
+          size="sm"
+          icon={<Play size={14} />}
+          disabled={busy}
+          onClick={() => void run(() => api.post(`/api/sessions/${s.id}/start`))}
+        >
+          Начать
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -226,85 +226,179 @@ function Unplanned({ today }: { today: Today }) {
   const disciplines = today.semester?.disciplines.filter((d) => d.frequency !== null) ?? [];
   const [id, setId] = useState('');
   const { run, error, busy } = useAction();
-  if (disciplines.length === 0 || today.timer || today.pendingSummary) return null;
+  if (disciplines.length === 0 || today.pendingSummary) return null;
   return (
-    <section>
-      <h2>Позаниматься вне расписания</h2>
-      <div className="row">
-        <select value={id} onChange={(e) => setId(e.target.value)}>
-          <option value="">— дисциплина —</option>
+    <Card title="Хочется позаниматься сейчас" icon={<Zap size={18} color="var(--violet)" />}>
+      <div className="stack">
+        <select className="select" value={id} onChange={(e) => setId(e.target.value)}>
+          <option value="">Выбери дисциплину</option>
           {disciplines.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
             </option>
           ))}
         </select>
-        <button
-          className="secondary"
+        <Button
+          variant="secondary"
+          icon={<Play size={15} />}
           disabled={!id || busy}
           onClick={() => void run(() => api.post('/api/sessions/unplanned', { disciplineId: id }))}
         >
-          Начать
-        </button>
+          Начать вне расписания
+        </Button>
+        <p className="faint">Пойдёт в статистику, расписание не изменится.</p>
+        <ErrorText error={error} />
       </div>
-      <p className="muted">Пойдёт в статистику, расписание не изменится.</p>
-      <ErrorText error={error} />
-    </section>
+    </Card>
+  );
+}
+
+function Pulse() {
+  const { data } = useApi<Stats | null>('/api/stats');
+  if (!data) return null;
+  const held = data.disciplines.reduce((sum, d) => sum + d.held, 0);
+  const actual = data.disciplines.reduce((sum, d) => sum + d.actualMinutes, 0);
+  return (
+    <Card title="Как идёт семестр" icon={<TrendingUp size={18} color="var(--primary)" />}>
+      <div className="stack" style={{ gap: 10 }}>
+        <div className="row between">
+          <span className="row muted" style={{ gap: 8 }}>
+            <Flame size={16} color="var(--warning)" /> Серия без пропусков
+          </span>
+          <strong>{data.streak}</strong>
+        </div>
+        <div className="row between">
+          <span className="row muted" style={{ gap: 8 }}>
+            <Brain size={16} color="var(--violet)" /> Чистая учёба
+          </span>
+          <strong>{formatDuration(actual)}</strong>
+        </div>
+        <div className="row between">
+          <span className="row muted" style={{ gap: 8 }}>
+            <NotebookPen size={16} color="var(--success)" /> Проведено занятий
+          </span>
+          <strong>{held}</strong>
+        </div>
+        {data.forecast.overall !== null && (
+          <div className="row between">
+            <span className="row muted" style={{ gap: 8 }}>
+              <Target size={16} color="var(--violet)" /> Прогноз к концу семестра
+            </span>
+            <strong>{formatPercent(data.forecast.overall)} плана</strong>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
 export function TodayScreen({ today }: { today: Today }) {
   const zone = today.timezone;
+  if (today.timer) return <FocusView timer={today.timer} />;
+
+  const date = DateTime.fromMillis(today.now, { zone }).setLocale('ru').toFormat('cccc, d MMMM');
+  const header = (
+    <PageHeader
+      title={greeting(today.now, zone)}
+      subtitle={date[0]!.toUpperCase() + date.slice(1)}
+    />
+  );
+
   if (!today.semester) {
     return (
-      <section>
-        <h2>Сегодня</h2>
-        {today.draftPending ? (
-          <p>
-            Черновик расписания ждёт подтверждения — <a href="#semester">посмотреть</a>.
-          </p>
-        ) : (
-          <p>
-            Семестр ещё не составлен — <a href="#semester">составить расписание</a>.
-          </p>
-        )}
-      </section>
+      <>
+        {header}
+        <Card>
+          <Empty
+            icon={<Layers size={26} />}
+            title={
+              today.draftPending ? 'Расписание ждёт подтверждения' : 'Семестр ещё не составлен'
+            }
+            action={
+              <Button
+                icon={<ArrowRight size={16} />}
+                onClick={() => (window.location.hash = 'semester')}
+              >
+                {today.draftPending ? 'Посмотреть черновик' : 'Составить расписание'}
+              </Button>
+            }
+          >
+            Сервис разложит дисциплины по неделе с учётом твоего времени и календаря.
+          </Empty>
+        </Card>
+      </>
     );
   }
-  const upcoming = today.sessions.some((s) => s.status === 'planned' && s.end > today.now);
+
+  const upcoming =
+    today.sessions.find((s) => s.status === 'planned' && s.end > today.now) ?? today.next;
+
   return (
     <>
-      {today.timer && <SessionInProgress timer={today.timer} />}
-      {!today.timer && today.pendingSummary && (
-        <SummaryForm session={today.pendingSummary} zone={zone} />
-      )}
-      {today.openDecisions > 0 && (
-        <p className="warning">
-          Есть вопросы, которые ждут твоего решения: <a href="#decisions">{today.openDecisions}</a>.
-        </p>
-      )}
-      <section>
-        <h2>
-          Сегодня{today.semester.currentWeek !== null && ` · неделя ${today.semester.currentWeek}`}
-        </h2>
-        {today.sessions.length === 0 ? (
-          <p className="muted">Сегодня занятий нет.</p>
-        ) : (
-          <table>
-            <tbody>
-              {today.sessions.map((s) => (
-                <SessionRow key={s.id} s={s} today={today} />
-              ))}
-            </tbody>
-          </table>
-        )}
-        {!upcoming && today.next && (
-          <p>
-            Следующее: {today.next.disciplineName}, {range(today.next.start, today.next.end, zone)}
-          </p>
-        )}
-      </section>
-      <Unplanned today={today} />
+      {header}
+      <div className="split">
+        <div className="stack-lg">
+          {today.pendingSummary ? (
+            <SummaryCard session={today.pendingSummary} zone={zone} />
+          ) : upcoming ? (
+            <NextHero session={upcoming} today={today} />
+          ) : (
+            <Card>
+              <Empty icon={<Sparkles size={26} />} title="Семестр завершён">
+                Занятий больше нет — загляни в «Решения», там итоги.
+              </Empty>
+            </Card>
+          )}
+          <Card
+            title="Сегодня"
+            action={
+              <span className="faint">
+                {today.sessions.length
+                  ? `${today.sessions.length} ${plural(today.sessions.length, SESSION_FORMS)}`
+                  : ''}
+              </span>
+            }
+          >
+            {today.sessions.length === 0 ? (
+              <p className="muted">
+                Сегодня занятий нет — можно отдохнуть или позаниматься вне расписания.
+              </p>
+            ) : (
+              <div className="stack" style={{ gap: 8 }}>
+                {today.sessions.map((s) => (
+                  <LessonRow key={s.id} s={s} today={today} />
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+        <div className="stack-lg">
+          {today.openDecisions > 0 && (
+            <Card className="tinted">
+              <div className="stack">
+                <div className="row" style={{ gap: 10 }}>
+                  <Inbox size={20} color="var(--violet)" />
+                  <strong>
+                    {today.openDecisions === 1
+                      ? 'Есть вопрос, который ждёт решения'
+                      : `${today.openDecisions} ${plural(today.openDecisions, ['вопрос', 'вопроса', 'вопросов'])} ждут решения`}
+                  </strong>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<ArrowRight size={15} />}
+                  onClick={() => (window.location.hash = 'decisions')}
+                >
+                  Разобрать
+                </Button>
+              </div>
+            </Card>
+          )}
+          <Pulse />
+          <Unplanned today={today} />
+        </div>
+      </div>
     </>
   );
 }

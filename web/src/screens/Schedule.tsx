@@ -1,15 +1,63 @@
-import { useState } from 'react';
+import {
+  CalendarClock,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  MoveRight,
+  SkipForward,
+  X,
+} from 'lucide-react';
+import type { DateTime } from 'luxon';
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api, ApiError, errorText } from '../api';
-import { ErrorText, Loading } from '../components';
-import { day, fromInput, local, ORIGIN, STATUS, time, toInput, weekStart } from '../format';
+import { useAccent, useColor } from '../colors';
+import {
+  day,
+  formatClock,
+  fromInput,
+  local,
+  ORIGIN,
+  STATUS,
+  time,
+  toInput,
+  weekStart,
+} from '../format';
 import { useApi, useRefresh } from '../hooks';
-import type { SessionView, Today, Violation } from '../types';
+import type { AppSettings, SessionView, Today, Violation, Weekday } from '../types';
+import { Alert, Badge, Button, Card, Empty, ErrorText, Loading, PageHeader } from '../ui';
 
-/** Ручной перенос: если правила нарушаются — показать какие и спросить (раздел 6, п. 9). */
-function MoveForm({ s, zone, onDone }: { s: SessionView; zone: string; onDone: () => void }) {
+const PX_PER_MIN = 1.15;
+/** Шаг перетаскивания — четверть часа. */
+const SNAP_MINUTES = 15;
+/** Сдвиг меньше этого — не перетаскивание, а нажатие. */
+const DRAG_THRESHOLD_PX = 5;
+
+/** Перенос, который сервер не принял из-за правил: его показывают в панели занятия. */
+interface PendingMove {
+  start: number;
+  violations: Violation[];
+}
+
+const violationsOf = (e: unknown) =>
+  e instanceof ApiError
+    ? (e.details as { violations?: Violation[] } | undefined)?.violations
+    : undefined;
+
+/** Ручной перенос: если правила нарушаются — показать какие и спросить. */
+function MoveForm({
+  s,
+  zone,
+  pending,
+  onDone,
+}: {
+  s: SessionView;
+  zone: string;
+  pending?: PendingMove | undefined;
+  onDone: () => void;
+}) {
   const { refresh } = useRefresh();
-  const [value, setValue] = useState(toInput(s.start, zone));
-  const [violations, setViolations] = useState<Violation[] | null>(null);
+  const [value, setValue] = useState(toInput(pending?.start ?? s.start, zone));
+  const [violations, setViolations] = useState<Violation[] | null>(pending?.violations ?? null);
   const [error, setError] = useState<string | null>(null);
 
   const move = async (confirm: boolean) => {
@@ -19,9 +67,8 @@ function MoveForm({ s, zone, onDone }: { s: SessionView; zone: string; onDone: (
       refresh();
       onDone();
     } catch (e) {
-      const details =
-        e instanceof ApiError ? (e.details as { violations?: Violation[] } | undefined) : undefined;
-      if (details?.violations) setViolations(details.violations);
+      const found = violationsOf(e);
+      if (found) setViolations(found);
       else setError(errorText(e));
     }
   };
@@ -29,37 +76,52 @@ function MoveForm({ s, zone, onDone }: { s: SessionView; zone: string; onDone: (
   return (
     <div className="stack">
       <input
+        className="input"
         type="datetime-local"
         value={value}
-        onChange={(e) => (setValue(e.target.value), setViolations(null))}
+        onChange={(e) => {
+          setValue(e.target.value);
+          setViolations(null);
+        }}
       />
-      <div className="row">
-        <button onClick={() => void move(false)}>Перенести</button>
-        <button className="secondary" onClick={onDone}>
-          Отмена
-        </button>
-      </div>
-      {violations && (
-        <div className="warning">
-          Так нарушаются правила:
-          <ul>
+      {violations ? (
+        <Alert tone="warning">
+          <div className="stack" style={{ gap: 6 }}>
+            <strong>Так нарушаются правила:</strong>
             {violations.map((v, i) => (
-              <li key={i}>{v.message}</li>
+              <span key={i}>• {v.message}</span>
             ))}
-          </ul>
-          <button className="danger" onClick={() => void move(true)}>
-            Перенести всё равно
-          </button>
-        </div>
+            <div>
+              <Button variant="danger" size="sm" onClick={() => void move(true)}>
+                Перенести всё равно
+              </Button>
+            </div>
+          </div>
+        </Alert>
+      ) : (
+        <Button icon={<MoveRight size={16} />} onClick={() => void move(false)}>
+          Перенести
+        </Button>
       )}
       <ErrorText error={error} />
     </div>
   );
 }
 
-function SessionCard({ s, today }: { s: SessionView; today: Today }) {
+function SessionPanel({
+  s,
+  today,
+  pending,
+  onClose,
+}: {
+  s: SessionView;
+  today: Today;
+  pending?: PendingMove | undefined;
+  onClose: () => void;
+}) {
   const { refresh } = useRefresh();
-  const [moving, setMoving] = useState(false);
+  const color = useColor(s.disciplineId);
+  const [moving, setMoving] = useState(pending !== undefined);
   const [error, setError] = useState<string | null>(null);
   const zone = today.timezone;
   const future = s.status === 'planned' && s.start > today.now;
@@ -74,96 +136,384 @@ function SessionCard({ s, today }: { s: SessionView; today: Today }) {
     try {
       await api.post(`/api/sessions/${s.id}/skip`);
       refresh();
+      onClose();
     } catch (e) {
       setError(errorText(e));
     }
   };
 
   return (
-    <div className={`slot ${s.status}`}>
-      <strong>
-        {time(s.start, zone)}–{time(s.end, zone)}
-      </strong>{' '}
-      {s.disciplineName}
-      <div className="muted">
-        {STATUS[s.status]}
-        {ORIGIN[s.origin] && ` · ${ORIGIN[s.origin]}`}
-        {s.moveReason && !s.moveReason.startsWith(ORIGIN[s.origin]) && ` (${s.moveReason})`}
-      </div>
-      {s.acceptedViolations && s.acceptedViolations.length > 0 && (
-        <div className="muted">с твоего согласия нарушено правило</div>
-      )}
-      {future && !moving && (
-        <div className="row">
-          <button className="secondary" onClick={() => setMoving(true)}>
-            Перенести
-          </button>
-          <button className="secondary" onClick={() => void skip()}>
-            Пропустить
-          </button>
+    <div className="panel">
+      <Card
+        title={s.disciplineName}
+        icon={<span className="dot" style={{ background: color.accent, width: 12, height: 12 }} />}
+        action={
+          <Button variant="ghost" icon={<X size={16} />} aria-label="Закрыть" onClick={onClose} />
+        }
+      >
+        <div className="stack">
+          <span className="muted">
+            {local(s.start, zone).setLocale('ru').toFormat('cccc, d MMMM')} · {time(s.start, zone)}–
+            {time(s.end, zone)}
+          </span>
+          <div className="row">
+            <Badge
+              tone={s.status === 'held' ? 'success' : s.status === 'missed' ? 'danger' : 'primary'}
+            >
+              {STATUS[s.status]}
+            </Badge>
+            {ORIGIN[s.origin] && <Badge tone="violet">{ORIGIN[s.origin]}</Badge>}
+          </div>
+          {s.moveReason && !s.moveReason.startsWith(ORIGIN[s.origin]) && (
+            <p className="faint">Причина: {s.moveReason}</p>
+          )}
+          {s.acceptedViolations && s.acceptedViolations.length > 0 && (
+            <p className="faint">С твоего согласия здесь нарушено правило расписания.</p>
+          )}
+          {s.actualMinutes !== undefined && (
+            <p className="faint">Чистая учёба: {s.actualMinutes} мин</p>
+          )}
+          {future && !moving && (
+            <div className="row">
+              <Button
+                variant="secondary"
+                icon={<CalendarClock size={16} />}
+                onClick={() => setMoving(true)}
+              >
+                Перенести
+              </Button>
+              <Button variant="ghost" icon={<SkipForward size={16} />} onClick={() => void skip()}>
+                Пропустить
+              </Button>
+            </div>
+          )}
+          {moving && <MoveForm s={s} zone={zone} pending={pending} onDone={onClose} />}
+          <ErrorText error={error} />
         </div>
-      )}
-      {moving && <MoveForm s={s} zone={zone} onDone={() => setMoving(false)} />}
-      <ErrorText error={error} />
+      </Card>
     </div>
   );
 }
 
+function Block({
+  s,
+  top,
+  height,
+  zone,
+  selected,
+  draggable,
+  dragging,
+  onSelect,
+  onPointerDown,
+}: {
+  s: SessionView;
+  top: number;
+  height: number;
+  zone: string;
+  selected: boolean;
+  draggable: boolean;
+  dragging: boolean;
+  onSelect: () => void;
+  onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => void;
+}) {
+  const style = useAccent(s.disciplineId);
+  const classes = ['block', s.status, selected && 'selected', draggable && 'draggable'];
+  return (
+    <button
+      type="button"
+      className={classes.filter(Boolean).join(' ')}
+      style={{ ...style, top, height: Math.max(height, 34), opacity: dragging ? 0.35 : undefined }}
+      onClick={onSelect}
+      onPointerDown={onPointerDown}
+    >
+      <strong>
+        {s.status === 'held' && <Check size={13} style={{ verticalAlign: -2, marginRight: 3 }} />}
+        {s.disciplineName}
+      </strong>
+      <span className="faint">
+        {time(s.start, zone)}–{time(s.end, zone)}
+      </span>
+    </button>
+  );
+}
+
+/** Тень занятия там, куда его сейчас тянут. */
+function Ghost({ s, top, minute }: { s: SessionView; top: number; minute: number }) {
+  const style = useAccent(s.disciplineId);
+  const minutes = (s.end - s.start) / 60_000;
+  return (
+    <div
+      className="block ghost"
+      style={{ ...style, top, height: Math.max(minutes * PX_PER_MIN - 3, 34) }}
+    >
+      <strong>{s.disciplineName}</strong>
+      <span className="faint">
+        {formatClock(minute)}–{formatClock(minute + minutes)}
+      </span>
+    </div>
+  );
+}
+
+interface Drag {
+  id: string;
+  /** Куда тянут сейчас: день недели (0–6) и минута от начала дня. */
+  dayIndex: number;
+  minute: number;
+  moved: boolean;
+}
+
 export function ScheduleScreen({ today }: { today: Today }) {
   const zone = today.timezone;
+  const { refresh } = useRefresh();
   const [offset, setOffset] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingMove | undefined>(undefined);
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const [dragError, setDragError] = useState<string | null>(null);
+  const columns = useRef<(HTMLDivElement | null)[]>([]);
+  const suppressClick = useRef(false);
   const monday = local(weekStart(today.now, zone), zone).plus({ weeks: offset });
   const from = monday.toMillis();
   const to = monday.plus({ weeks: 1 }).toMillis();
   const { data, error } = useApi<SessionView[]>(
     today.semester ? `/api/schedule?from=${from}&to=${to}` : null,
   );
+  const { data: settings } = useApi<AppSettings>('/api/settings');
+
+  const select = (id: string | null) => {
+    setSelected(id);
+    setPending(undefined);
+  };
+
+  const header = (
+    <PageHeader
+      title="Расписание"
+      subtitle={`${monday.setLocale('ru').toFormat('d MMMM')} — ${monday.plus({ days: 6 }).setLocale('ru').toFormat('d MMMM')}`}
+      actions={
+        today.semester && (
+          <>
+            <Button
+              variant="secondary"
+              icon={<ChevronLeft size={17} />}
+              aria-label="Прошлая неделя"
+              onClick={() => setOffset(offset - 1)}
+            />
+            <Button variant="secondary" onClick={() => setOffset(0)} disabled={offset === 0}>
+              Эта неделя
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<ChevronRight size={17} />}
+              aria-label="Следующая неделя"
+              onClick={() => setOffset(offset + 1)}
+            />
+          </>
+        )
+      }
+    />
+  );
 
   if (!today.semester) {
     return (
-      <section>
-        <h2>Расписание</h2>
-        <p>
-          Семестр ещё не составлен — <a href="#semester">составить</a>.
-        </p>
-      </section>
+      <>
+        {header}
+        <Card>
+          <Empty icon={<CalendarClock size={26} />} title="Расписания пока нет">
+            Составь семестр — и здесь появится неделя с занятиями.
+          </Empty>
+        </Card>
+      </>
     );
   }
+  if (!data || !settings) {
+    return (
+      <>
+        {header}
+        <Loading error={error} height={420} />
+      </>
+    );
+  }
+
+  const minuteOf = (t: number) => {
+    const dt = local(t, zone);
+    return dt.hour * 60 + dt.minute;
+  };
+  const marks = [
+    ...settings.studyWindows.flatMap((w) => [w.start, w.end]),
+    ...data.flatMap((s) => [minuteOf(s.start), minuteOf(s.start) + (s.end - s.start) / 60_000]),
+  ];
+  const startHour = Math.max(0, Math.floor(Math.min(...marks) / 60) - 1);
+  const endHour = Math.min(24, Math.ceil(Math.max(...marks) / 60) + 1);
+  const height = (endHour - startHour) * 60 * PX_PER_MIN;
+  const y = (minute: number) => (minute - startHour * 60) * PX_PER_MIN;
   const days = Array.from({ length: 7 }, (_, i) => monday.plus({ days: i }));
   const todayKey = local(today.now, zone).toISODate();
+  const nowMinute = minuteOf(today.now);
+  const selectedSession = data.find((s) => s.id === selected);
+  const dragged = drag ? data.find((s) => s.id === drag.id) : undefined;
+  const at = (d: DateTime, minute: number) =>
+    d.set({ hour: Math.floor(minute / 60), minute: minute % 60 }).toMillis();
+
+  /** Перетаскивание будущего занятия мышью или пальцем; отпустил — перенос с проверкой правил. */
+  const startDrag = (s: SessionView, dayIndex: number, e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const origin = minuteOf(s.start);
+    const length = (s.end - s.start) / 60_000;
+    let current: Drag = { id: s.id, dayIndex, minute: origin, moved: false };
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!current.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+      const column = columns.current.findIndex((el) => {
+        const r = el?.getBoundingClientRect();
+        return r !== undefined && ev.clientX >= r.left && ev.clientX < r.right;
+      });
+      const snapped = Math.round(dy / PX_PER_MIN / SNAP_MINUTES) * SNAP_MINUTES;
+      const minute = Math.min(Math.max(origin + snapped, startHour * 60), endHour * 60 - length);
+      current = {
+        id: s.id,
+        dayIndex: column === -1 ? current.dayIndex : column,
+        minute,
+        moved: true,
+      };
+      setDrag(current);
+    };
+
+    const onUp = () => {
+      target.removeEventListener('pointermove', onMove);
+      target.removeEventListener('pointerup', onUp);
+      target.removeEventListener('pointercancel', onUp);
+      setDrag(null);
+      if (!current.moved) return;
+      // Щелчок, который браузер пришлёт следом за перетаскиванием, — не выбор занятия.
+      // Флаг сбрасывается при следующем нажатии на любое занятие.
+      suppressClick.current = true;
+      const start = at(days[current.dayIndex]!, current.minute);
+      if (start === s.start) return;
+      setDragError(null);
+      api
+        .post(`/api/sessions/${s.id}/move`, { start, confirm: false })
+        .then(() => refresh())
+        .catch((err: unknown) => {
+          const violations = violationsOf(err);
+          if (violations) {
+            setSelected(s.id);
+            setPending({ start, violations });
+          } else setDragError(errorText(err));
+        });
+    };
+
+    target.addEventListener('pointermove', onMove);
+    target.addEventListener('pointerup', onUp);
+    target.addEventListener('pointercancel', onUp);
+  };
 
   return (
-    <section>
-      <div className="row">
-        <h2 style={{ margin: 0 }}>
-          Неделя {day(from, zone)} — {day(to - 1, zone)}
-        </h2>
-        <button className="secondary" onClick={() => setOffset(offset - 1)}>
-          ←
-        </button>
-        <button className="secondary" onClick={() => setOffset(0)}>
-          Эта неделя
-        </button>
-        <button className="secondary" onClick={() => setOffset(offset + 1)}>
-          →
-        </button>
-      </div>
-      {!data ? (
-        <Loading error={error} />
-      ) : (
-        <div className="week" style={{ marginTop: 8 }}>
-          {days.map((d) => (
-            <div className={`day ${d.toISODate() === todayKey ? 'today' : ''}`} key={d.toISODate()}>
-              <strong>{day(d.toMillis(), zone)}</strong>
-              {data
-                .filter((s) => local(s.start, zone).toISODate() === d.toISODate())
-                .map((s) => (
-                  <SessionCard key={s.id} s={s} today={today} />
-                ))}
-            </div>
-          ))}
+    <>
+      {header}
+      {dragError && (
+        <div style={{ marginBottom: 12 }}>
+          <Alert tone="danger">{dragError}</Alert>
         </div>
       )}
-    </section>
+      <div className="week-grid">
+        <div className="day-head" style={{ borderLeft: 'none' }} />
+        {days.map((d) => (
+          <div
+            key={d.toISODate()}
+            className={`day-head ${d.toISODate() === todayKey ? 'today' : ''}`}
+          >
+            {d.setLocale('ru').toFormat('ccc')}
+            <strong>{d.day}</strong>
+          </div>
+        ))}
+        <div className="hours" style={{ height }}>
+          {/* Подписи — только внутренним линиям: у краёв сетки они обрезались бы. */}
+          {Array.from({ length: endHour - startHour - 1 }, (_, i) => (
+            <span key={i} className="hour" style={{ top: (i + 1) * 60 * PX_PER_MIN }}>
+              {String(startHour + i + 1).padStart(2, '0')}:00
+            </span>
+          ))}
+        </div>
+        {days.map((d, dayIndex) => {
+          const key = d.toISODate();
+          const excluded = settings.excludedWeekdays.includes(d.weekday as Weekday);
+          return (
+            <div
+              key={key}
+              ref={(el) => {
+                columns.current[dayIndex] = el;
+              }}
+              className={`day-col ${key === todayKey ? 'today' : ''}`}
+              style={{ height, backgroundSize: `100% ${60 * PX_PER_MIN}px` }}
+            >
+              {!excluded &&
+                settings.studyWindows.map((w, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      top: y(w.start),
+                      height: (w.end - w.start) * PX_PER_MIN,
+                      background: 'rgba(79, 95, 232, 0.05)',
+                    }}
+                  />
+                ))}
+              {key === todayKey && nowMinute >= startHour * 60 && nowMinute <= endHour * 60 && (
+                <div className="now-line" style={{ top: y(nowMinute) }} />
+              )}
+              {data
+                .filter((s) => local(s.start, zone).toISODate() === key)
+                .map((s) => (
+                  <Block
+                    key={s.id}
+                    s={s}
+                    top={y(minuteOf(s.start))}
+                    height={((s.end - s.start) / 60_000) * PX_PER_MIN - 3}
+                    zone={zone}
+                    selected={s.id === selected}
+                    draggable={s.status === 'planned' && s.start > today.now}
+                    dragging={drag?.id === s.id && drag.moved}
+                    onPointerDown={(e) => {
+                      suppressClick.current = false;
+                      if (s.status === 'planned' && s.start > today.now) startDrag(s, dayIndex, e);
+                    }}
+                    onSelect={() => {
+                      if (suppressClick.current) {
+                        suppressClick.current = false;
+                        return;
+                      }
+                      select(s.id === selected ? null : s.id);
+                    }}
+                  />
+                ))}
+              {drag?.moved && dragged && drag.dayIndex === dayIndex && (
+                <Ghost s={dragged} top={y(drag.minute)} minute={drag.minute} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="faint" style={{ marginTop: 10 }}>
+        Голубым подсвечены окна для учёбы. Будущее занятие можно перетащить на другое время или
+        нажать на него, чтобы перенести или пропустить.
+      </p>
+      {selectedSession && (
+        <SessionPanel
+          key={`${selectedSession.id}-${pending?.start ?? ''}`}
+          s={selectedSession}
+          today={today}
+          pending={pending}
+          onClose={() => select(null)}
+        />
+      )}
+    </>
   );
 }

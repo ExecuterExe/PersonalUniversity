@@ -1,10 +1,35 @@
 import { ALLOWED_DURATIONS } from '@ou/engine';
+import {
+  Archive,
+  BookOpen,
+  ExternalLink,
+  Link2,
+  NotebookPen,
+  Plus,
+  StickyNote,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
-import { ErrorText, Loading } from '../components';
-import { formatDuration, PRIORITY } from '../format';
+import { useAccent } from '../colors';
+import { formatDuration, formatHours, formatPercent, PRIORITY } from '../format';
 import { useAction, useApi } from '../hooks';
-import type { Discipline, Priority, Source } from '../types';
+import type { Discipline, Priority, Source, Stats } from '../types';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Empty,
+  ErrorText,
+  Field,
+  Loading,
+  Option,
+  PageHeader,
+  Progress,
+  Segmented,
+} from '../ui';
 
 interface DisciplineInput {
   name: string;
@@ -35,78 +60,97 @@ export function DisciplineForm({
   lockPlan?: boolean;
 }) {
   const [form, setForm] = useState(initial);
+  const [busy, setBusy] = useState(false);
   const set = (patch: Partial<DisciplineInput>) => setForm({ ...form, ...patch });
   return (
     <form
-      className="stack"
+      className="stack-lg"
       onSubmit={(e) => {
         e.preventDefault();
-        void onSubmit(form).then((ok) => {
-          if (ok && initial === EMPTY) setForm(EMPTY);
-        });
+        setBusy(true);
+        void onSubmit(form)
+          .then((ok) => {
+            if (ok && initial === EMPTY) setForm(EMPTY);
+          })
+          .finally(() => setBusy(false));
       }}
     >
-      <label>
-        Название
-        <input value={form.name} onChange={(e) => set({ name: e.target.value })} />
-      </label>
-      <div className="row">
-        <label className="inline">
-          <input
-            type="radio"
-            checked={form.priority === 'main'}
+      <Field label="Название">
+        <input
+          className="input"
+          placeholder="Например, SQL"
+          value={form.name}
+          onChange={(e) => set({ name: e.target.value })}
+        />
+      </Field>
+      <div className="field">
+        Приоритет
+        <div className="grid-2" style={{ gap: 10 }}>
+          <Option
+            on={form.priority === 'main'}
             disabled={lockPlan}
-            onChange={() => set({ priority: 'main' })}
-          />
-          основная — несколько раз в неделю
-        </label>
-        <label className="inline">
-          <input
-            type="radio"
-            checked={form.priority === 'additional'}
+            onClick={() => set({ priority: 'main' })}
+          >
+            <span className="title">Основная</span>
+            <span className="sub">несколько раз в неделю</span>
+          </Option>
+          <Option
+            on={form.priority === 'additional'}
             disabled={lockPlan}
-            onChange={() => set({ priority: 'additional' })}
-          />
-          дополнительная — раз в неделю
-        </label>
+            onClick={() => set({ priority: 'additional' })}
+          >
+            <span className="title">Дополнительная</span>
+            <span className="sub">раз в неделю</span>
+          </Option>
+        </div>
       </div>
-      <label>
+      <div className="field">
         Длительность занятия
-        <select
-          value={form.durationMinutes}
-          disabled={lockPlan}
-          onChange={(e) => set({ durationMinutes: Number(e.target.value) })}
-        >
+        <div className="chips">
           {ALLOWED_DURATIONS.map((m) => (
-            <option key={m} value={m}>
+            <button
+              type="button"
+              key={m}
+              className={`chip ${form.durationMinutes === m ? 'on' : ''}`}
+              disabled={lockPlan}
+              onClick={() => set({ durationMinutes: m })}
+            >
               {formatDuration(m)}
-            </option>
+            </button>
           ))}
-        </select>
-      </label>
+        </div>
+      </div>
       {lockPlan && (
-        <p className="muted">
+        <p className="faint">
           Дисциплина идёт в семестре: приоритет поменяется со следующего, длительность — через
           подсказку о калибровке.
         </p>
       )}
-      <label>
-        Цель — чего хочу достичь
-        <textarea value={form.goal} onChange={(e) => set({ goal: e.target.value })} />
-      </label>
-      <label>
-        Метрики — как пойму, что цель достигнута
-        <textarea value={form.metrics} onChange={(e) => set({ metrics: e.target.value })} />
-      </label>
+      <Field label="Цель" hint="Чего хочу достичь">
+        <textarea
+          className="textarea"
+          value={form.goal}
+          onChange={(e) => set({ goal: e.target.value })}
+        />
+      </Field>
+      <Field label="Метрики" hint="Как пойму, что цель достигнута">
+        <textarea
+          className="textarea"
+          value={form.metrics}
+          onChange={(e) => set({ metrics: e.target.value })}
+        />
+      </Field>
       <div>
-        <button type="submit">{submitLabel}</button>
+        <Button type="submit" disabled={busy}>
+          {submitLabel}
+        </Button>
       </div>
     </form>
   );
 }
 
 function Sources({ disciplineId, sources }: { disciplineId: string; sources: Source[] }) {
-  const { run, error } = useAction();
+  const { run, error, busy } = useAction();
   const [kind, setKind] = useState<'link' | 'note'>('link');
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
@@ -126,99 +170,221 @@ function Sources({ disciplineId, sources }: { disciplineId: string; sources: Sou
 
   return (
     <div className="stack">
-      {sources.length === 0 && <p className="muted">Источников пока нет.</p>}
-      <ul>
-        {sources.map((s) => (
-          <li key={s.id}>
+      {sources.length === 0 && (
+        <p className="faint">Источников пока нет — добавь ссылку или книгу.</p>
+      )}
+      {sources.map((s) => (
+        <div className="source" key={s.id}>
+          {s.url ? (
+            <Link2 size={17} color="var(--primary)" />
+          ) : (
+            <StickyNote size={17} color="var(--violet)" />
+          )}
+          <div className="grow">
             {s.url ? (
               <a href={s.url} target="_blank" rel="noreferrer">
-                {s.title}
+                {s.title} <ExternalLink size={12} style={{ verticalAlign: -1 }} />
               </a>
             ) : (
               <strong>{s.title}</strong>
             )}
             {s.kind === 'note' && s.note && s.note !== s.title && (
-              <div className="muted" style={{ whiteSpace: 'pre-wrap' }}>
+              <div className="muted small" style={{ whiteSpace: 'pre-wrap' }}>
                 {s.note}
               </div>
-            )}{' '}
-            <button
-              className="danger"
-              onClick={() => void run(() => api.del(`/api/sources/${s.id}`))}
-            >
-              Удалить
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div className="row">
-        <label className="inline">
-          <input type="radio" checked={kind === 'link'} onChange={() => setKind('link')} /> ссылка
-        </label>
-        <label className="inline">
-          <input type="radio" checked={kind === 'note'} onChange={() => setKind('note')} /> заметка
-          (книга, глава…)
-        </label>
-      </div>
-      {kind === 'link' ? (
-        <input placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} />
-      ) : (
-        <textarea
-          placeholder="Например: «SQL. Быстрое погружение», главы 1–3"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Trash2 size={15} />}
+            aria-label="Удалить источник"
+            onClick={() => void run(() => api.del(`/api/sources/${s.id}`))}
+          />
+        </div>
+      ))}
+      <div className="card flat stack" style={{ padding: 14, background: 'var(--surface-2)' }}>
+        <Segmented
+          value={kind}
+          options={[
+            { value: 'link', label: 'Ссылка' },
+            { value: 'note', label: 'Заметка' },
+          ]}
+          onChange={setKind}
         />
-      )}
-      <input
-        placeholder="Название (необязательно)"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-      />
-      <div>
-        <button className="secondary" onClick={() => void add()}>
-          Добавить источник
-        </button>
+        {kind === 'link' ? (
+          <input
+            className="input"
+            placeholder="https://…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        ) : (
+          <textarea
+            className="textarea"
+            placeholder="Например: «SQL. Быстрое погружение», главы 1–3"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        )}
+        <input
+          className="input"
+          placeholder="Название (необязательно)"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <div>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Plus size={15} />}
+            disabled={busy}
+            onClick={() => void add()}
+          >
+            Добавить источник
+          </Button>
+        </div>
       </div>
       <ErrorText error={error} />
     </div>
   );
 }
 
-function DisciplineCard({ id, inSemester }: { id: string; inSemester: boolean }) {
+function DisciplineDetail({
+  id,
+  inSemester,
+  onClose,
+}: {
+  id: string;
+  inSemester: boolean;
+  onClose: () => void;
+}) {
   const { data, error } = useApi<Discipline & { sources: Source[] }>(`/api/disciplines/${id}`);
+  const { data: stats } = useApi<Stats | null>('/api/stats');
   const { run, error: actionError } = useAction();
-  if (!data) return <Loading error={error} />;
+  const style = useAccent(id);
+  if (!data) return <Loading error={error} height={240} />;
+  const progress = stats?.disciplines.find((x) => x.disciplineId === id);
+  const pct = (v: number | null) => (v === null ? '—' : formatPercent(v));
   return (
-    <div className="stack">
-      <h2>{data.name}</h2>
-      {data.continueHint && <p className="warning">С чего продолжить: {data.continueHint}</p>}
-      <h3>Источники</h3>
-      <Sources disciplineId={id} sources={data.sources} />
-      <h3>Карточка</h3>
-      <DisciplineForm
-        key={data.id + data.durationMinutes + data.priority}
-        initial={data}
-        lockPlan={inSemester}
-        submitLabel="Сохранить"
-        onSubmit={(input) => run(() => api.patch(`/api/disciplines/${id}`, input))}
-      />
-      {data.archivedAt === null ? (
-        <div>
-          <button
-            className="danger"
-            onClick={() => {
-              if (confirm(`Отправить «${data.name}» в архив?`))
-                void run(() => api.post(`/api/disciplines/${id}/archive`));
-            }}
-          >
-            В архив
-          </button>
+    <Card
+      style={style}
+      title={data.name}
+      icon={
+        <span className="swatch-sm">
+          <BookOpen size={17} />
+        </span>
+      }
+      action={
+        <div className="row" style={{ gap: 6 }}>
+          {data.archivedAt === null ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Archive size={15} />}
+              onClick={() => {
+                if (confirm(`Отправить «${data.name}» в архив?`))
+                  void run(() => api.post(`/api/disciplines/${id}/archive`));
+              }}
+            >
+              В архив
+            </Button>
+          ) : (
+            <Badge>в архиве</Badge>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<X size={16} />}
+            aria-label="Закрыть"
+            onClick={onClose}
+          />
         </div>
-      ) : (
-        <p className="muted">В архиве.</p>
-      )}
-      <ErrorText error={actionError} />
-    </div>
+      }
+    >
+      <div className="stack-lg">
+        {progress && (
+          <div className="stack" style={{ gap: 8 }}>
+            <div className="row between">
+              <h3>Прогресс в семестре</h3>
+              <span className="muted">
+                <strong style={{ color: 'var(--text)' }}>
+                  {formatHours(progress.actualMinutes)}
+                </strong>{' '}
+                из {formatHours(progress.plannedMinutes)} · {pct(progress.progress)}
+              </span>
+            </div>
+            <Progress
+              accent
+              value={progress.progress ?? 0}
+              label={`${data.name}: ${formatHours(progress.actualMinutes)} из ${formatHours(progress.plannedMinutes)}`}
+            />
+            <span className="faint">
+              проведено {progress.held} · пропущено {progress.missed} · посещаемость{' '}
+              {pct(progress.attendance)} · прогноз к концу {pct(progress.forecast)}
+            </span>
+          </div>
+        )}
+        {data.continueHint && (
+          <Alert>
+            <strong>С чего продолжить:</strong> {data.continueHint}
+          </Alert>
+        )}
+        <div className="grid-2" style={{ alignItems: 'start' }}>
+          <div className="stack">
+            <h3>Источники</h3>
+            <Sources disciplineId={id} sources={data.sources} />
+          </div>
+          <div className="stack">
+            <h3>Карточка</h3>
+            <DisciplineForm
+              key={data.id + data.durationMinutes + data.priority}
+              initial={data}
+              lockPlan={inSemester}
+              submitLabel="Сохранить"
+              onSubmit={(input) => run(() => api.patch(`/api/disciplines/${id}`, input))}
+            />
+          </div>
+        </div>
+        <ErrorText error={actionError} />
+      </div>
+    </Card>
+  );
+}
+
+function DisciplineTile({
+  d,
+  selected,
+  inSemester,
+  onSelect,
+}: {
+  d: Discipline;
+  selected: boolean;
+  inSemester: boolean;
+  onSelect: () => void;
+}) {
+  const style = useAccent(d.id);
+  return (
+    <button
+      type="button"
+      className={`discipline-card ${selected ? 'on' : ''}`}
+      style={style}
+      onClick={onSelect}
+    >
+      <div className="row between">
+        <span className="swatch">
+          <BookOpen size={18} />
+        </span>
+        {inSemester && <Badge tone="success">в семестре</Badge>}
+        {d.archivedAt !== null && <Badge>архив</Badge>}
+      </div>
+      <h3 style={{ marginTop: 4 }}>{d.name}</h3>
+      <div className="row" style={{ gap: 6 }}>
+        <Badge tone={d.priority === 'main' ? 'primary' : 'violet'}>{PRIORITY[d.priority]}</Badge>
+        <Badge>{formatDuration(d.durationMinutes)}</Badge>
+      </div>
+      <p className="goal">{d.goal}</p>
+    </button>
   );
 }
 
@@ -230,63 +396,102 @@ export function DisciplinesScreen({
   const [archived, setArchived] = useState(false);
   const { data, error } = useApi<Discipline[]>(`/api/disciplines?archived=${archived}`);
   const [selected, setSelected] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const { run, error: createError } = useAction();
+  const list = data?.filter((d) => archived || d.archivedAt === null);
+
+  const form = (
+    <Card
+      title="Новая дисциплина"
+      icon={<NotebookPen size={19} color="var(--primary)" />}
+      action={
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<X size={16} />}
+          aria-label="Закрыть"
+          onClick={() => setCreating(false)}
+        />
+      }
+    >
+      <DisciplineForm
+        submitLabel="Добавить"
+        onSubmit={async (input) => {
+          const created = await run(() => api.post<Discipline>('/api/disciplines', input));
+          if (created) {
+            setCreating(false);
+            setSelected(created.id);
+          }
+          return created;
+        }}
+      />
+      <ErrorText error={createError} />
+    </Card>
+  );
 
   return (
     <>
-      <section>
-        <h2>Дисциплины</h2>
-        {!data ? (
+      <PageHeader
+        title="Дисциплины"
+        subtitle="Что изучаешь, зачем и по каким материалам"
+        actions={
+          <>
+            <Segmented
+              value={archived ? 'all' : 'active'}
+              options={[
+                { value: 'active', label: 'Активные' },
+                { value: 'all', label: 'Вместе с архивом' },
+              ]}
+              onChange={(v) => setArchived(v === 'all')}
+            />
+            <Button icon={<Plus size={17} />} onClick={() => setCreating(true)}>
+              Новая дисциплина
+            </Button>
+          </>
+        }
+      />
+      <div className="stack-lg">
+        {creating && form}
+        {!list ? (
           <Loading error={error} />
+        ) : list.length === 0 ? (
+          !creating && (
+            <Card>
+              <Empty
+                icon={<BookOpen size={26} />}
+                title="Дисциплин пока нет"
+                action={
+                  <Button icon={<Plus size={17} />} onClick={() => setCreating(true)}>
+                    Добавить первую
+                  </Button>
+                }
+              >
+                Добавь то, что хочешь изучать: цель, метрики и длительность занятия.
+              </Empty>
+            </Card>
+          )
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Название</th>
-                <th>Приоритет</th>
-                <th>Занятие</th>
-                <th>Цель</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((d) => (
-                <tr key={d.id} onClick={() => setSelected(d.id)} style={{ cursor: 'pointer' }}>
-                  <td>
-                    <a href="#disciplines" onClick={(e) => e.preventDefault()}>
-                      {d.name}
-                    </a>
-                    {d.archivedAt !== null && <span className="muted"> (архив)</span>}
-                  </td>
-                  <td>{PRIORITY[d.priority]}</td>
-                  <td>{formatDuration(d.durationMinutes)}</td>
-                  <td>{d.goal}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="grid-3">
+            {list.map((d) => (
+              <DisciplineTile
+                key={d.id}
+                d={d}
+                selected={d.id === selected}
+                inSemester={semesterDisciplineIds.includes(d.id)}
+                onSelect={() => setSelected(d.id === selected ? null : d.id)}
+              />
+            ))}
+          </div>
         )}
-        <label className="inline">
-          <input
-            type="checkbox"
-            checked={archived}
-            onChange={(e) => setArchived(e.target.checked)}
-          />{' '}
-          показать архив
-        </label>
-      </section>
-      {selected && (
-        <section>
-          <DisciplineCard id={selected} inSemester={semesterDisciplineIds.includes(selected)} />
-        </section>
-      )}
-      <section>
-        <h2>Новая дисциплина</h2>
-        <DisciplineForm
-          submitLabel="Добавить"
-          onSubmit={(input) => run(() => api.post<Discipline>('/api/disciplines', input))}
-        />
-        <ErrorText error={createError} />
-      </section>
+        {selected && (
+          <DisciplineDetail
+            key={selected}
+            id={selected}
+            inSemester={semesterDisciplineIds.includes(selected)}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </div>
     </>
   );
 }

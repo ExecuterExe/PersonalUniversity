@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
+// Составные элементы, общие для нескольких экранов.
+import { Plus, Trash2 } from 'lucide-react';
+import { accent, useColor } from './colors';
 import {
   formatClock,
-  formatDuration,
   formatFrequency,
   formatHours,
   formatPercent,
@@ -11,15 +12,7 @@ import {
   WEEKDAYS,
 } from './format';
 import type { Budget, SemesterView, SkeletonSlot, TimeWindow, Weekday } from './types';
-
-export function ErrorText({ error }: { error: string | null | undefined }) {
-  return error ? <p className="error">{error}</p> : null;
-}
-
-export function Loading({ error, children }: { error: string | null; children?: ReactNode }) {
-  if (error) return <ErrorText error={error} />;
-  return <p className="muted">{children ?? 'Загружаю…'}</p>;
-}
+import { Button } from './ui';
 
 /** Окна времени: 10:00–13:00, 17:00–22:00 … */
 export function WindowsEditor({
@@ -36,33 +29,35 @@ export function WindowsEditor({
       {value.map((w, i) => (
         <div className="row" key={i}>
           <input
+            className="input time"
             type="time"
             value={minutesToInput(w.start)}
             onChange={(e) => update(i, { start: inputToMinutes(e.target.value) })}
           />
-          –
+          <span className="muted">—</span>
           <input
+            className="input time"
             type="time"
             value={minutesToInput(w.end)}
             onChange={(e) => update(i, { end: inputToMinutes(e.target.value) || 24 * 60 })}
           />
-          <button
-            type="button"
-            className="secondary"
+          <Button
+            variant="ghost"
+            icon={<Trash2 size={16} />}
+            aria-label="Убрать окно"
             onClick={() => onChange(value.filter((_, j) => j !== i))}
-          >
-            Убрать
-          </button>
+          />
         </div>
       ))}
       <div>
-        <button
-          type="button"
-          className="secondary"
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<Plus size={15} />}
           onClick={() => onChange([...value, { start: 10 * 60, end: 13 * 60 }])}
         >
           Добавить окно
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -76,25 +71,56 @@ export function WeekdayPicker({
   onChange: (next: Weekday[]) => void;
 }) {
   return (
-    <div className="row">
-      {WEEKDAYS.map((d) => (
-        <label className="inline" key={d}>
-          <input
-            type="checkbox"
-            checked={value.includes(d)}
-            onChange={(e) =>
-              onChange(e.target.checked ? [...value, d].sort() : value.filter((x) => x !== d))
-            }
-          />
-          {WEEKDAY_SHORT[d]}
-        </label>
-      ))}
+    <div className="chips">
+      {WEEKDAYS.map((d) => {
+        const on = value.includes(d);
+        return (
+          <button
+            type="button"
+            key={d}
+            className={`chip ${on ? 'on' : ''}`}
+            onClick={() => onChange(on ? value.filter((x) => x !== d) : [...value, d].sort())}
+          >
+            {WEEKDAY_SHORT[d]}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-/** Бюджет недели (методология, раздел 4). */
-export function BudgetTable({
+function BudgetRow({
+  id,
+  name,
+  frequency,
+  minutes,
+}: {
+  id: string;
+  name: string;
+  frequency: string;
+  minutes: number;
+}) {
+  const color = useColor(id);
+  return (
+    <div className="row between">
+      <span className="row" style={{ gap: 8 }}>
+        <span className="dot" style={{ background: color.accent }} />
+        {name}
+      </span>
+      <span className="muted small">
+        {frequency} · {formatHours(minutes)}
+      </span>
+    </div>
+  );
+}
+
+function BudgetSegment({ id, share }: { id: string; share: number }) {
+  const color = useColor(id);
+  return <span style={{ width: `${share * 100}%`, background: color.accent }} />;
+}
+
+/** Бюджет недели (методология, раздел 4): полоса по дисциплинам и запас до лимита. */
+export function BudgetView({
   budget,
   disciplines,
 }: {
@@ -104,32 +130,58 @@ export function BudgetTable({
   const name = (id: string) => disciplines.find((d) => d.id === id)?.name ?? id;
   const share = (m: number) => formatPercent(m / (budget.averageMinutes || 1));
   return (
-    <>
-      <p>
-        В неделю {formatHours(budget.averageMinutes)} из {formatHours(budget.capMinutes)}: основные{' '}
-        {formatHours(budget.mainMinutes)} ({share(budget.mainMinutes)}), дополнительные{' '}
-        {formatHours(budget.additionalMinutes)} ({share(budget.additionalMinutes)}), резерв{' '}
-        {formatHours(budget.reserveMinutes)}.
-      </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Дисциплина</th>
-            <th>Как часто</th>
-            <th>В неделю</th>
-          </tr>
-        </thead>
-        <tbody>
-          {budget.items.map((item) => (
-            <tr key={item.disciplineId}>
-              <td>{name(item.disciplineId)}</td>
-              <td>{formatFrequency(item.frequency)}</td>
-              <td>{formatHours(item.weeklyMinutes)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
+    <div className="stack">
+      <div className="row between">
+        <span>
+          <strong style={{ fontSize: 22, fontWeight: 650 }}>
+            {formatHours(budget.averageMinutes)}
+          </strong>{' '}
+          <span className="muted">в неделю из {formatHours(budget.capMinutes)}</span>
+        </span>
+        <span className="faint">
+          основные {share(budget.mainMinutes)} · дополнительные {share(budget.additionalMinutes)} ·
+          резерв {formatHours(budget.reserveMinutes)}
+        </span>
+      </div>
+      <div className="stacked">
+        {budget.items.map((item) => (
+          <BudgetSegment
+            key={item.disciplineId}
+            id={item.disciplineId}
+            share={item.weeklyMinutes / budget.capMinutes}
+          />
+        ))}
+      </div>
+      <div className="stack" style={{ gap: 8 }}>
+        {budget.items.map((item) => (
+          <BudgetRow
+            key={item.disciplineId}
+            id={item.disciplineId}
+            name={name(item.disciplineId)}
+            frequency={formatFrequency(item.frequency)}
+            minutes={item.weeklyMinutes}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonChip({ slot, name }: { slot: SkeletonSlot; name: string }) {
+  const color = useColor(slot.disciplineId);
+  return (
+    <div
+      className="lesson"
+      style={{ ...accent(color), padding: '8px 10px 8px 14px', fontSize: 13 }}
+    >
+      <div className="grow" title={name}>
+        <strong className="clip">{name}</strong>
+        <div className="faint">
+          {formatClock(slot.startMinute)}–{formatClock(slot.startMinute + slot.durationMinutes)}
+          {slot.parity !== undefined && ' · раз в 2 нед.'}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -142,25 +194,28 @@ export function SkeletonGrid({
   names: Map<string, string>;
 }) {
   return (
-    <div className="week">
+    <div
+      className="grid-4"
+      style={{ gridTemplateColumns: 'repeat(7, minmax(110px, 1fr))', overflowX: 'auto' }}
+    >
       {WEEKDAYS.map((d) => (
-        <div className="day" key={d}>
-          <strong>{WEEKDAY_SHORT[d]}</strong>
+        <div className="stack" style={{ gap: 6 }} key={d}>
+          <span className="faint" style={{ fontWeight: 600 }}>
+            {WEEKDAY_SHORT[d]}
+          </span>
           {slots
             .filter((s) => s.weekday === d)
             .sort((a, b) => a.startMinute - b.startMinute)
             .map((s) => (
-              <div className="slot" key={s.id}>
-                {formatClock(s.startMinute)}–{formatClock(s.startMinute + s.durationMinutes)}
-                <br />
-                {names.get(s.disciplineId) ?? s.disciplineId}
-                {s.parity !== undefined && <div className="muted">раз в 2 недели</div>}
-              </div>
+              <SkeletonChip
+                key={s.id}
+                slot={s}
+                name={names.get(s.disciplineId) ?? s.disciplineId}
+              />
             ))}
+          {!slots.some((s) => s.weekday === d) && <span className="faint">свободно</span>}
         </div>
       ))}
     </div>
   );
 }
-
-export const durationLabel = formatDuration;

@@ -1,39 +1,133 @@
+import {
+  ArrowRight,
+  CalendarCheck2,
+  CalendarPlus,
+  CalendarRange,
+  Clock3,
+  GitCompareArrows,
+  Layers,
+  ListChecks,
+  RefreshCw,
+  Trash2,
+  Wallet,
+} from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
-import { BudgetTable, ErrorText, Loading, SkeletonGrid } from '../components';
-import { day, formatFrequency, formatHours, local, time } from '../format';
+import { useColor } from '../colors';
+import { BudgetView, SkeletonGrid } from '../components';
+import { formatFrequency, formatHours, local, time } from '../format';
 import { useAction, useApi } from '../hooks';
 import type { AppSettings, ChangeView, Discipline, SemesterView, Today } from '../types';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  ErrorText,
+  Field,
+  Loading,
+  Option,
+  PageHeader,
+  Segmented,
+  Stat,
+} from '../ui';
+
+const dateLabel = (iso: string) => local(Date.parse(iso), 'UTC').setLocale('ru').toFormat('d MMMM');
+
+function SemesterStats({ sem }: { sem: SemesterView }) {
+  return (
+    <div className="grid-4">
+      <Stat
+        icon={<CalendarRange size={16} />}
+        label="Длительность"
+        value={`${sem.fullWeeks} нед.`}
+        note={
+          sem.leadDays > 0
+            ? `+ ${sem.leadDays} дн. в начале`
+            : `${dateLabel(sem.startDate)} — ${dateLabel(sem.endDate)}`
+        }
+      />
+      <Stat
+        icon={<Clock3 size={16} />}
+        label="Сейчас"
+        value={
+          sem.currentWeek !== null && sem.currentWeek > 0
+            ? `${sem.currentWeek}-я неделя`
+            : 'скоро старт'
+        }
+        note={`до ${dateLabel(sem.endDate)}`}
+      />
+      <Stat icon={<ListChecks size={16} />} label="Занятий в семестре" value={sem.sessionsCount} />
+      <Stat
+        icon={<Wallet size={16} />}
+        label="В неделю"
+        value={sem.budget ? formatHours(sem.budget.averageMinutes) : '—'}
+        note={sem.budget ? `лимит ${formatHours(sem.budget.capMinutes)}` : undefined}
+      />
+    </div>
+  );
+}
+
+function MovedRow({
+  m,
+  name,
+  zone,
+}: {
+  m: SemesterView['moved'][number];
+  name: string;
+  zone: string;
+}) {
+  const color = useColor(m.disciplineId);
+  const when = (t: number) =>
+    `${local(t, zone).setLocale('ru').toFormat('ccc, d MMM')} ${time(t, zone)}`;
+  return (
+    <div className="row between">
+      <span className="row" style={{ gap: 8 }}>
+        <span className="dot" style={{ background: color.accent }} />
+        <strong>{name}</strong>
+        <span className="muted">
+          {when(m.from)} <ArrowRight size={13} style={{ verticalAlign: -2 }} /> {when(m.to)}
+        </span>
+      </span>
+      <span className="faint">{m.reason}</span>
+    </div>
+  );
+}
 
 function SemesterSummary({ sem, zone }: { sem: SemesterView; zone: string }) {
   const names = new Map(sem.disciplines.map((d) => [d.id, d.name]));
   return (
-    <div className="stack">
-      <p>
-        {sem.startDate} — {sem.endDate}: {sem.fullWeeks} нед.
-        {sem.leadDays > 0 && ` + ${sem.leadDays} дн. в начале`}
-        {sem.currentWeek !== null && ` · сейчас неделя ${sem.currentWeek}`}
-      </p>
+    <div className="stack-lg">
       {sem.warnings.map((w, i) => (
-        <p className="warning" key={i}>
+        <Alert tone="warning" key={i}>
           {w.message}
-        </p>
+        </Alert>
       ))}
-      {sem.budget && <BudgetTable budget={sem.budget} disciplines={sem.disciplines} />}
-      <h3>Типичная неделя</h3>
-      <SkeletonGrid slots={sem.skeleton} names={names} />
+      <SemesterStats sem={sem} />
+      {sem.budget && (
+        <Card title="Бюджет недели" icon={<Wallet size={19} color="var(--primary)" />}>
+          <BudgetView budget={sem.budget} disciplines={sem.disciplines} />
+        </Card>
+      )}
+      <Card title="Типичная неделя" icon={<Layers size={19} color="var(--violet)" />}>
+        <SkeletonGrid slots={sem.skeleton} names={names} />
+      </Card>
       {sem.moved.length > 0 && (
-        <>
-          <h3>Перенесено из-за событий в календаре</h3>
-          <ul>
+        <Card
+          title="Перенесено из-за событий в календаре"
+          icon={<GitCompareArrows size={19} color="var(--primary)" />}
+        >
+          <div className="stack">
             {sem.moved.map((m) => (
-              <li key={m.sessionId}>
-                «{names.get(m.disciplineId)}»: {day(m.from, zone)} {time(m.from, zone)} →{' '}
-                {day(m.to, zone)} {time(m.to, zone)} ({m.reason})
-              </li>
+              <MovedRow
+                key={m.sessionId}
+                m={m}
+                name={names.get(m.disciplineId) ?? ''}
+                zone={zone}
+              />
             ))}
-          </ul>
-        </>
+          </div>
+        </Card>
       )}
     </div>
   );
@@ -42,64 +136,111 @@ function SemesterSummary({ sem, zone }: { sem: SemesterView; zone: string }) {
 function DraftView({ draft, zone }: { draft: SemesterView; zone: string }) {
   const { run, error, busy } = useAction();
   return (
-    <section>
-      <h2>Черновик семестра</h2>
-      {draft.failure ? (
-        <div className="stack">
-          <p className="error">{draft.failure.message}</p>
-          {draft.compromises.length > 0 ? (
-            <>
-              <p>Что можно сделать (любой вариант):</p>
-              {draft.compromises.map((c) => (
-                <div className="row" key={c.index}>
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() => api.post(`/api/semesters/draft/compromises/${c.index}`))
-                    }
-                  >
-                    Выбрать
-                  </button>
-                  {c.title} — самая тяжёлая неделя {formatHours(c.peakMinutes)}
-                </div>
-              ))}
-            </>
-          ) : (
-            <p>Подходящих компромиссов не нашлось — поменяй настройки или состав дисциплин.</p>
-          )}
-        </div>
-      ) : (
-        <SemesterSummary sem={draft} zone={zone} />
-      )}
-      <div className="row" style={{ marginTop: 12 }}>
-        {!draft.failure && (
-          <button
-            disabled={busy}
-            onClick={() => void run(() => api.post('/api/semesters/draft/confirm'))}
-          >
-            Подтвердить — начать семестр
-          </button>
+    <>
+      <PageHeader
+        title="Черновик семестра"
+        subtitle={`${dateLabel(draft.startDate)} — ${dateLabel(draft.endDate)}. Пока не подтвердишь, в календаре ничего не появится.`}
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              icon={<Trash2 size={16} />}
+              disabled={busy}
+              onClick={() => {
+                if (confirm('Удалить черновик?')) void run(() => api.del('/api/semesters/draft'));
+              }}
+            >
+              Удалить
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<RefreshCw size={16} />}
+              disabled={busy}
+              onClick={() => void run(() => api.post('/api/semesters/draft/refresh'))}
+            >
+              Пересчитать
+            </Button>
+            {!draft.failure && (
+              <Button
+                icon={<CalendarCheck2 size={17} />}
+                disabled={busy}
+                onClick={() => void run(() => api.post('/api/semesters/draft/confirm'))}
+              >
+                Подтвердить и начать
+              </Button>
+            )}
+          </>
+        }
+      />
+      <div className="stack-lg">
+        <ErrorText error={error} />
+        {draft.failure ? (
+          <Card>
+            <div className="stack">
+              <Alert tone="danger">{draft.failure.message}</Alert>
+              {draft.compromises.length > 0 ? (
+                <>
+                  <p className="muted">Что можно сделать — подойдёт любой вариант:</p>
+                  {draft.compromises.map((c) => (
+                    <div key={c.index} className="option" style={{ cursor: 'default' }}>
+                      <span className="grow">
+                        <span className="title">{c.title}</span>
+                        <span className="sub">
+                          самая тяжёлая неделя — {formatHours(c.peakMinutes)}
+                        </span>
+                      </span>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(() => api.post(`/api/semesters/draft/compromises/${c.index}`))
+                        }
+                      >
+                        Выбрать
+                      </Button>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <p className="muted">
+                  Подходящих компромиссов не нашлось — поменяй настройки или состав дисциплин.
+                </p>
+              )}
+            </div>
+          </Card>
+        ) : (
+          <SemesterSummary sem={draft} zone={zone} />
         )}
-        <button
-          className="secondary"
-          disabled={busy}
-          onClick={() => void run(() => api.post('/api/semesters/draft/refresh'))}
-        >
-          Пересчитать
-        </button>
-        <button
-          className="danger"
-          disabled={busy}
-          onClick={() => {
-            if (confirm('Удалить черновик?')) void run(() => api.del('/api/semesters/draft'));
-          }}
-        >
-          Удалить черновик
-        </button>
       </div>
-      <ErrorText error={error} />
-    </section>
+    </>
+  );
+}
+
+function DisciplineCheck({
+  d,
+  checked,
+  onChange,
+}: {
+  d: Discipline;
+  checked: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  const color = useColor(d.id);
+  return (
+    <label className="option" style={{ cursor: 'pointer' }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ width: 17, height: 17, accentColor: 'var(--primary)' }}
+      />
+      <span className="dot" style={{ background: color.accent }} />
+      <span className="grow">
+        <span className="title">{d.name}</span>
+        <span className="sub">{d.priority === 'main' ? 'основная' : 'дополнительная'}</span>
+      </span>
+    </label>
   );
 }
 
@@ -114,46 +255,52 @@ export function NewSemesterForm({ zone, now }: { zone: string; now: number }) {
   const [chosen, setChosen] = useState<string[] | null>(null);
   const { run, error: createError, busy } = useAction();
   if (!disciplines || !settings) return <Loading error={error} />;
-  if (disciplines.length === 0) return <p>Сначала добавь дисциплины.</p>;
+  if (disciplines.length === 0) return <Alert>Сначала добавь дисциплины.</Alert>;
   const ids = chosen ?? disciplines.map((d) => d.id);
   const fullWeeks = weeks ?? settings.defaultSemesterWeeks;
 
   return (
-    <div className="stack">
-      <div className="row">
-        <label>
-          Начало
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </label>
-        <label>
-          Полных недель
+    <div className="stack-lg">
+      <div className="grid-2">
+        <Field label="Начало">
           <input
+            className="input"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </Field>
+        <Field
+          label="Полных недель"
+          hint="Если начало не в понедельник, первые дни добавятся к ним"
+        >
+          <input
+            className="input"
             type="number"
             min={1}
             max={52}
             value={fullWeeks}
             onChange={(e) => setWeeks(Number(e.target.value))}
           />
-        </label>
+        </Field>
       </div>
-      <p className="muted">
-        Если семестр начинается не с понедельника, первые дни добавятся к этим неделям.
-      </p>
-      <h3>Дисциплины семестра</h3>
-      {disciplines.map((d) => (
-        <label className="inline" key={d.id}>
-          <input
-            type="checkbox"
-            checked={ids.includes(d.id)}
-            onChange={(e) =>
-              setChosen(e.target.checked ? [...ids, d.id] : ids.filter((x) => x !== d.id))
-            }
-          />
-          {d.name}
-        </label>
-      ))}
+      <div className="field">
+        Дисциплины семестра
+        <div className="grid-2" style={{ gap: 10 }}>
+          {disciplines.map((d) => (
+            <DisciplineCheck
+              key={d.id}
+              d={d}
+              checked={ids.includes(d.id)}
+              onChange={(on) => setChosen(on ? [...ids, d.id] : ids.filter((x) => x !== d.id))}
+            />
+          ))}
+        </div>
+      </div>
       <div>
-        <button
+        <Button
+          size="lg"
+          icon={<CalendarPlus size={18} />}
           disabled={busy || ids.length === 0}
           onClick={() =>
             void run(() =>
@@ -161,8 +308,8 @@ export function NewSemesterForm({ zone, now }: { zone: string; now: number }) {
             )
           }
         >
-          Составить расписание
-        </button>
+          {busy ? 'Составляю…' : 'Составить расписание'}
+        </Button>
       </div>
       <ErrorText error={createError} />
     </div>
@@ -192,18 +339,21 @@ function ChangesPanel({ sem }: { sem: SemesterView }) {
   return (
     <div className="stack">
       <div className="row">
-        <select
+        <Segmented
           value={type}
-          onChange={(e) => {
-            setType(e.target.value as 'add' | 'remove');
+          options={[
+            { value: 'add', label: 'Добавить' },
+            { value: 'remove', label: 'Убрать' },
+          ]}
+          onChange={(v) => {
+            setType(v);
             setDisciplineId('');
             setPreview(null);
           }}
-        >
-          <option value="add">Добавить дисциплину</option>
-          <option value="remove">Убрать дисциплину</option>
-        </select>
+        />
         <select
+          className="select"
+          style={{ width: 'auto', minWidth: 220 }}
           value={disciplineId}
           onChange={(e) => {
             setDisciplineId(e.target.value);
@@ -211,15 +361,15 @@ function ChangesPanel({ sem }: { sem: SemesterView }) {
             setCompromise(undefined);
           }}
         >
-          <option value="">— выбери —</option>
+          <option value="">Выбери дисциплину…</option>
           {options.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
             </option>
           ))}
         </select>
-        <button
-          className="secondary"
+        <Button
+          variant="secondary"
           disabled={!disciplineId || busy}
           onClick={async () => {
             const result = await run(() =>
@@ -229,47 +379,63 @@ function ChangesPanel({ sem }: { sem: SemesterView }) {
           }}
         >
           Что изменится
-        </button>
+        </Button>
       </div>
+      {options.length === 0 && (
+        <p className="faint">
+          {type === 'add'
+            ? 'Все дисциплины уже в семестре — новую можно создать в «Дисциплинах».'
+            : 'Убирать нечего.'}
+        </p>
+      )}
       {preview && (
-        <div className="card">
-          <p>
-            Нагрузка: {formatHours(preview.before.averageMinutes)} →{' '}
-            {preview.after ? formatHours(preview.after.averageMinutes) : '—'} в неделю (лимит{' '}
-            {formatHours(preview.before.capMinutes)}).
-          </p>
+        <div className="card flat stack" style={{ background: 'var(--surface-2)' }}>
+          <div className="row" style={{ gap: 14 }}>
+            <span className="stat-inline">
+              <span className="faint">Сейчас</span>
+              <strong>{formatHours(preview.before.averageMinutes)}</strong>
+            </span>
+            <ArrowRight size={18} color="var(--text-3)" />
+            <span className="stat-inline">
+              <span className="faint">Станет</span>
+              <strong>{preview.after ? formatHours(preview.after.averageMinutes) : '—'}</strong>
+            </span>
+            <span className="faint">в неделю · лимит {formatHours(preview.before.capMinutes)}</span>
+          </div>
           {preview.frequencyChanges.map((c) => (
             <p key={c.disciplineId}>
-              «{c.name}»: {c.from ? formatFrequency(c.from) : 'нет'} →{' '}
+              <strong>{c.name}</strong>: {c.from ? formatFrequency(c.from) : 'нет'} →{' '}
               {c.to ? formatFrequency(c.to) : 'убирается'}
             </p>
           ))}
-          <p className="muted">
-            Добавится занятий: {preview.addedSessions}, уберётся: {preview.removedSessions}. Прошлое
-            не меняется.
-          </p>
-          {preview.failure && <p className="error">{preview.failure}</p>}
+          <div className="row" style={{ gap: 6 }}>
+            <Badge tone="success">+{preview.addedSessions} занятий</Badge>
+            <Badge tone="danger">−{preview.removedSessions} занятий</Badge>
+            <span className="faint">Прошлое не меняется, прогресс сохраняется.</span>
+          </div>
+          {preview.failure && <Alert tone="danger">{preview.failure}</Alert>}
           {preview.compromises.map((c) => (
-            <label className="inline" key={c.index}>
-              <input
-                type="radio"
-                checked={compromise === c.index}
-                onChange={() => setCompromise(c.index)}
-              />
+            <Option
+              key={c.index}
+              on={compromise === c.index}
+              onClick={() => setCompromise(c.index)}
+            >
               {c.title}
-            </label>
+            </Option>
           ))}
-          <button
-            disabled={busy || (!preview.ok && compromise === undefined)}
-            onClick={async () => {
-              if (await run(() => api.post('/api/semesters/active/changes/apply', body()))) {
-                setPreview(null);
-                setDisciplineId('');
-              }
-            }}
-          >
-            Применить
-          </button>
+          <div>
+            <Button
+              disabled={busy || (!preview.ok && compromise === undefined)}
+              onClick={async () => {
+                if (await run(() => api.post('/api/semesters/active/changes/apply', body()))) {
+                  setPreview(null);
+                  setDisciplineId('');
+                }
+              }}
+            >
+              Применить
+            </Button>
+          </div>
         </div>
       )}
       <ErrorText error={error} />
@@ -282,27 +448,47 @@ export function SemesterScreen({ today }: { today: Today }) {
     today.draftPending ? '/api/semesters/draft' : null,
   );
   const zone = today.timezone;
+  const sem = today.semester;
 
-  if (today.semester) {
+  if (sem) {
     return (
       <>
-        <section>
-          <h2>Семестр</h2>
-          <SemesterSummary sem={today.semester} zone={zone} />
-        </section>
-        <section>
-          <h2>Изменения посреди семестра</h2>
-          <ChangesPanel sem={today.semester} />
-        </section>
+        <PageHeader
+          title="Семестр"
+          subtitle={`${dateLabel(sem.startDate)} — ${dateLabel(sem.endDate)}`}
+          actions={<Badge tone="success">идёт</Badge>}
+        />
+        <div className="stack-lg">
+          <SemesterSummary sem={sem} zone={zone} />
+          <Card
+            title="Изменения посреди семестра"
+            icon={<GitCompareArrows size={19} color="var(--violet)" />}
+          >
+            <ChangesPanel sem={sem} />
+          </Card>
+        </div>
       </>
     );
   }
-  if (today.draftPending)
-    return draft ? <DraftView draft={draft} zone={zone} /> : <Loading error={error} />;
+  if (today.draftPending) {
+    return draft ? (
+      <DraftView draft={draft} zone={zone} />
+    ) : (
+      <>
+        <PageHeader title="Черновик семестра" />
+        <Loading error={error} height={300} />
+      </>
+    );
+  }
   return (
-    <section>
-      <h2>Новый семестр</h2>
-      <NewSemesterForm zone={zone} now={today.now} />
-    </section>
+    <>
+      <PageHeader
+        title="Новый семестр"
+        subtitle="Выбери даты и дисциплины — расписание составится вокруг календаря"
+      />
+      <Card>
+        <NewSemesterForm zone={zone} now={today.now} />
+      </Card>
+    </>
   );
 }
