@@ -10,7 +10,13 @@ export default defineConfig(
   js.configs.recommended,
   tseslint.configs.recommended,
   {
-    files: ['*.js', 'server/**/*.ts', 'engine/sim/**/*.ts', 'web/vite.config.ts'],
+    files: [
+      '*.js',
+      'scripts/**/*.mjs',
+      'server/**/*.ts',
+      'engine/sim/**/*.ts',
+      'web/vite.config.ts',
+    ],
     languageOptions: { globals: globals.node },
   },
   {

@@ -48,6 +48,8 @@ export function stats(deps: Deps): Stats | null {
 
 export interface Today {
   now: Instant;
+  /** Для мастера первой настройки: что уже сделано. */
+  setup: { settingsSaved: boolean; disciplines: number };
   date: string;
   timezone: string;
   semester: SemesterView | null;
@@ -73,6 +75,10 @@ export async function today(deps: Deps): Promise<Today> {
   const sem = store.findSemester('active');
   const base = {
     now,
+    setup: {
+      settingsSaved: store.getSettings() !== null,
+      disciplines: store.listDisciplines().length,
+    },
     date,
     timezone,
     draftPending: store.findSemester('draft') !== null,

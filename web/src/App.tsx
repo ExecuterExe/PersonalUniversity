@@ -1,67 +1,118 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Loading } from './components';
+import { RefreshContext, useApi, useHashRoute, useRefresh } from './hooks';
+import { DecisionsScreen } from './screens/Decisions';
+import { DisciplinesScreen } from './screens/Disciplines';
+import { ScheduleScreen } from './screens/Schedule';
+import { SemesterScreen } from './screens/Semester';
+import { SettingsScreen } from './screens/Settings';
+import { SetupWizard, storedStep } from './screens/Setup';
+import { StatsScreen } from './screens/Stats';
+import { TodayScreen } from './screens/Today';
+import type { GoogleStatus, Today } from './types';
 
-interface Health {
-  status: string;
-  engineVersion: string;
-  googleConfigured: boolean;
-}
+const ROUTES = [
+  ['today', 'Сегодня'],
+  ['schedule', 'Расписание'],
+  ['decisions', 'Решения'],
+  ['disciplines', 'Дисциплины'],
+  ['semester', 'Семестр'],
+  ['stats', 'Статистика'],
+  ['settings', 'Настройки'],
+] as const;
 
-interface GoogleStatus {
-  connected: boolean;
-  email: string | null;
-  needsReauth: boolean;
-  lastSyncError: string | null;
-}
+const GOOGLE_RESULT: Record<string, string> = {
+  connected: 'Google Календарь подключён.',
+  denied: 'Вход в Google отменён.',
+  expired: 'Ссылка входа устарела — попробуй ещё раз.',
+  error: 'Google не подтвердил вход — попробуй ещё раз.',
+};
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json() as Promise<T>;
-}
+// Технический интерфейс этапа 4: все сценарии руками. Дизайн — на этапе 5.
+function Shell() {
+  const { refresh } = useRefresh();
+  const { data: today, error } = useApi<Today>('/api/today');
+  const { data: google } = useApi<GoogleStatus>('/api/google/status');
+  const [route, navigate] = useHashRoute('today');
+  const [wizardStep, setWizardStep] = useState<number | null>(storedStep);
+  const googleResult = new URLSearchParams(window.location.search).get('google');
 
-// Временная страница: интерфейс появится на этапе 4. Пока — проверка связи и вход в Google.
-export function App() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [google, setGoogle] = useState<GoogleStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const result = new URLSearchParams(window.location.search).get('google');
-
+  // Раз в минуту — свежие данные: пропуски, конфликты, таймер.
   useEffect(() => {
-    Promise.all([getJson<Health>('/api/health'), getJson<GoogleStatus>('/api/google/status')])
-      .then(([h, g]) => {
-        setHealth(h);
-        setGoogle(g);
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  }, []);
+    const id = setInterval(refresh, 60_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  // Сервер ещё запускается или перезапускается — пробуем снова через пару секунд.
+  useEffect(() => {
+    if (!error) return;
+    const id = setTimeout(refresh, 3000);
+    return () => clearTimeout(id);
+  }, [error, refresh]);
+
+  if (!today) return <Loading error={error} />;
+  const wizard = wizardStep ?? (today.setup.settingsSaved ? null : 0);
+  const semesterIds =
+    today.semester?.disciplines.filter((d) => d.frequency !== null).map((d) => d.id) ?? [];
 
   return (
-    <main>
-      <h1>Мой университет</h1>
-      {error && <p>Сервер недоступен: {error}</p>}
-      {!error && !health && <p>Проверяю сервер…</p>}
-      {result === 'denied' && <p>Вход в Google отменён.</p>}
-      {result === 'expired' && <p>Ссылка входа устарела — попробуй ещё раз.</p>}
-      {result === 'error' && <p>Google не подтвердил вход — попробуй ещё раз.</p>}
-      {health && (
-        <ul>
-          <li>Сервер: {health.status === 'ok' ? 'работает' : health.status}</li>
-          <li>Движок: версия {health.engineVersion}</li>
-          <li>
-            Google: {!health.googleConfigured && 'ключи ещё не заданы'}
-            {health.googleConfigured && google?.connected && !google.needsReauth && (
-              <>подключён ({google.email})</>
-            )}
-            {health.googleConfigured && google?.needsReauth && (
-              <a href="/auth/google">доступ истёк — войти заново</a>
-            )}
-            {health.googleConfigured && google && !google.connected && (
-              <a href="/auth/google">подключить Google Календарь</a>
-            )}
-          </li>
-          {google?.lastSyncError && <li>Последняя ошибка: {google.lastSyncError}</li>}
-        </ul>
+    <div className="app">
+      <header>
+        <h1>Мой университет</h1>
+        {google?.needsReauth && (
+          <span className="error">
+            Доступ к Google истёк — <a href="/auth/google">войти заново</a>
+          </span>
+        )}
+        {google?.connected && !google.needsReauth && google.lastSyncError && (
+          <span className="muted">Google: {google.lastSyncError}</span>
+        )}
+      </header>
+      {googleResult && GOOGLE_RESULT[googleResult] && (
+        <p className="warning">{GOOGLE_RESULT[googleResult]}</p>
       )}
-    </main>
+
+      {wizard !== null ? (
+        <SetupWizard
+          today={today}
+          step={wizard}
+          setStep={setWizardStep}
+          onFinish={() => {
+            setWizardStep(null);
+            navigate('semester');
+          }}
+        />
+      ) : (
+        <>
+          <nav>
+            {ROUTES.map(([id, title]) => (
+              <a key={id} href={`#${id}`} className={route === id ? 'active' : ''}>
+                {title}
+                {id === 'decisions' && today.openDecisions > 0 && (
+                  <span className="badge">{today.openDecisions}</span>
+                )}
+              </a>
+            ))}
+          </nav>
+          {route === 'today' && <TodayScreen today={today} />}
+          {route === 'schedule' && <ScheduleScreen today={today} />}
+          {route === 'decisions' && <DecisionsScreen today={today} />}
+          {route === 'disciplines' && <DisciplinesScreen semesterDisciplineIds={semesterIds} />}
+          {route === 'semester' && <SemesterScreen today={today} />}
+          {route === 'stats' && <StatsScreen />}
+          {route === 'settings' && <SettingsScreen />}
+        </>
+      )}
+    </div>
+  );
+}
+
+export function App() {
+  const [version, setVersion] = useState(0);
+  const refresh = useCallback(() => setVersion((v) => v + 1), []);
+  return (
+    <RefreshContext.Provider value={{ version, refresh }}>
+      <Shell />
+    </RefreshContext.Provider>
   );
 }

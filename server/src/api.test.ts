@@ -28,6 +28,18 @@ describe('настройки', () => {
     expect(bad.status).toBe(400);
     expect(bad.body.details[0].message).toBe('Конец окна должен быть позже начала');
 
+    const overlapping = await t.call('PUT', '/api/settings', {
+      ...USER_SETTINGS,
+      studyWindows: [
+        { start: 10 * 60, end: 13 * 60 },
+        { start: 10 * 60 + 24, end: 13 * 60 },
+      ],
+    });
+    expect(overlapping.status).toBe(400);
+    expect(overlapping.body.details[0].message).toBe(
+      'Окна для учёбы пересекаются — объедини их в одно',
+    );
+
     const saved = await t.call('PUT', '/api/settings', USER_SETTINGS);
     expect(saved.status).toBe(200);
     expect((await t.call('GET', '/api/settings')).body.bufferMinutes).toBe(30);

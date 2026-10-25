@@ -12,7 +12,14 @@ const SYNC_DELAY_MS = 3_000;
 
 readEnvFile();
 const config = loadConfig();
-const deps = createDeps({ dbPath: `${DATA_DIR}ou.sqlite`, config });
+
+// Только для проверки: отдельная база (OU_DB_PATH) и перематываемые часы (POST /api/dev/clock).
+const testMode = Boolean(process.env.OU_DB_PATH);
+const dbPath = process.env.OU_DB_PATH || `${DATA_DIR}ou.sqlite`;
+let clockShift = 0;
+const now = () => Date.now() + clockShift;
+const deps = createDeps({ dbPath, config, now });
+if (testMode) console.log(`Тестовый запуск: база ${dbPath}`);
 
 /** Изменения идут в Google пачкой: через несколько секунд после последнего. */
 let syncTimer: NodeJS.Timeout | undefined;
@@ -27,10 +34,18 @@ deps.afterChange = () => {
 
 const app = buildApp(config, deps);
 
+if (testMode) {
+  app.post('/api/dev/clock', async (req) => {
+    const { iso } = req.body as { iso: string };
+    clockShift += Date.parse(iso) - now();
+    return { now: new Date(now()).toISOString() };
+  });
+}
+
 /** При запуске и каждые 15 минут, пока сервер открыт: Google, проверки, резервная копия. */
 async function background(): Promise<void> {
   try {
-    backupIfDue(deps, `${DATA_DIR}backups`);
+    if (!testMode) backupIfDue(deps, `${DATA_DIR}backups`);
     await syncGoogle(deps);
     await runChecks(deps);
   } catch (error) {

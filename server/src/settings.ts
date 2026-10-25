@@ -71,7 +71,14 @@ export const weekdaySchema = z
 
 export const appSettingsSchema = z.object({
   timezone: z.string().refine(isValidZone, 'Неизвестный часовой пояс'),
-  studyWindows: z.array(windowSchema).min(1, 'Нужно хотя бы одно окно для учёбы'),
+  studyWindows: z
+    .array(windowSchema)
+    .min(1, 'Нужно хотя бы одно окно для учёбы')
+    .refine(
+      (ws) =>
+        ws.every((a, i) => ws.every((b, j) => i === j || a.end <= b.start || b.end <= a.start)),
+      'Окна для учёбы пересекаются — объедини их в одно',
+    ),
   inconvenient: z.array(
     z
       .object({
