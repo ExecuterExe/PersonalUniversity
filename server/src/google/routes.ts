@@ -22,6 +22,8 @@ export interface GoogleStatus {
   lastSyncError: string | null;
   /** Когда последний раз удалось получить занятость — «календарь не обновлялся с …». */
   busyUpdatedAt: number | null;
+  /** Часовой пояс основного календаря Google — в нём Google показывает занятия. */
+  calendarTimezone: string | null;
 }
 
 export function googleStatus(deps: Deps): GoogleStatus {
@@ -36,6 +38,7 @@ export function googleStatus(deps: Deps): GoogleStatus {
     lastSyncAt: account.lastSyncAt,
     lastSyncError: account.lastSyncError,
     busyUpdatedAt: deps.store.getBusyCache()?.fetchedAt ?? null,
+    calendarTimezone: account.calendarTimezone,
   };
 }
 
@@ -86,7 +89,10 @@ export function registerGoogleRoutes(app: FastifyInstance, deps: Deps, config: C
       const tokens = await deps.google.api.exchangeCode(query.code);
       deps.store.updateGoogleAccount({ tokens, needsReauth: false, lastSyncError: null });
       const primary = (await deps.google.api.listCalendars()).find((c) => c.primary);
-      deps.store.updateGoogleAccount({ email: primary?.id ?? null });
+      deps.store.updateGoogleAccount({
+        email: primary?.id ?? null,
+        calendarTimezone: primary?.timeZone ?? null,
+      });
       deps.store.clearBusyCache();
       deps.afterChange?.();
       return back('connected');
@@ -143,7 +149,12 @@ export function registerGoogleRoutes(app: FastifyInstance, deps: Deps, config: C
   app.post('/api/google/disconnect', async () => {
     const account = deps.store.getGoogleAccount();
     if (account.tokens && deps.google) await deps.google.api.revoke(account.tokens.refreshToken);
-    deps.store.updateGoogleAccount({ tokens: null, email: null, needsReauth: false });
+    deps.store.updateGoogleAccount({
+      tokens: null,
+      email: null,
+      needsReauth: false,
+      calendarTimezone: null,
+    });
     deps.store.clearBusyCache();
     return googleStatus(deps);
   });

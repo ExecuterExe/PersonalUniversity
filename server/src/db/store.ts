@@ -128,6 +128,11 @@ export interface GoogleAccount {
   busyCalendarIds: string[] | null;
   lastSyncAt: Instant | null;
   lastSyncError: string | null;
+  /**
+   * Часовой пояс основного календаря Google. Если он не совпадает с поясом сервиса,
+   * Google показывает занятия со сдвигом — интерфейс об этом предупреждает.
+   */
+  calendarTimezone: string | null;
 }
 
 export const EMPTY_GOOGLE_ACCOUNT: GoogleAccount = {
@@ -138,6 +143,7 @@ export const EMPTY_GOOGLE_ACCOUNT: GoogleAccount = {
   busyCalendarIds: null,
   lastSyncAt: null,
   lastSyncError: null,
+  calendarTimezone: null,
 };
 
 export interface CalendarLink {

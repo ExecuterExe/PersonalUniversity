@@ -160,11 +160,11 @@ function HeroArt() {
         <circle className="path" cx="210" cy="210" r="200" />
         <circle className="path" cx="210" cy="210" r="150" />
         <circle className="path" cx="210" cy="210" r="100" />
-        <g className="spin">
+        <g>
           <circle cx="210" cy="10" r="5" fill="#fff" />
           <circle cx="410" cy="210" r="3" fill="#fff" opacity="0.6" />
         </g>
-        <g className="spin slow">
+        <g>
           <circle cx="210" cy="60" r="4" fill="#c4f1ff" />
           <circle cx="60" cy="210" r="3" fill="#fff" opacity="0.7" />
           <circle cx="310" cy="210" r="2.5" fill="#ffd6f0" />
@@ -468,7 +468,7 @@ export function TodayScreen({ today }: { today: Today }) {
   const week = today.semester?.currentWeek;
   const header = (
     <PageHeader
-      icon={<hello.icon size={24} className="sway" />}
+      icon={<hello.icon size={24} />}
       title={hello.text}
       subtitle={date[0]!.toUpperCase() + date.slice(1)}
       actions={

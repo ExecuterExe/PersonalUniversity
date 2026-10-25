@@ -71,7 +71,7 @@ const TICK_STEP = (2 * Math.PI * TICKS_RADIUS) / 60;
 function PhaseRing({ view, totalCycles }: { view: TimerView; totalCycles: number }) {
   const { refresh } = useRefresh();
   const [base] = useState(() => ({ view, at: Date.now() }));
-  const now = useNow(500);
+  const now = useNow(1000);
   const v = base.view;
   const elapsed = v.paused ? 0 : now - base.at;
   const phaseLeft = v.phaseLengthMs - v.phaseElapsedMs - elapsed;

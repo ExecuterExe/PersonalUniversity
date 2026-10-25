@@ -80,7 +80,12 @@ export class GoogleCalendarSource implements CalendarSource {
   private async fetch(range: { start: Instant; end: Instant }): Promise<BusyEvent[]> {
     const account = this.store.getGoogleAccount();
     const timezone = this.timezone();
-    const calendars = (await this.api.listCalendars()).filter(
+    const all = await this.api.listCalendars();
+    const calendarTimezone = all.find((c) => c.primary)?.timeZone ?? null;
+    if (calendarTimezone !== account.calendarTimezone) {
+      this.store.updateGoogleAccount({ calendarTimezone });
+    }
+    const calendars = all.filter(
       (c) =>
         c.id !== account.calendarId &&
         c.accessRole !== 'freeBusyReader' &&

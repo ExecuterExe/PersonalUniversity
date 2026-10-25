@@ -206,6 +206,26 @@ describe('занятость из Google', () => {
   });
 });
 
+describe('часовой пояс Google', () => {
+  it('пояс основного календаря запоминается и обновляется — по нему видно расхождение с сервисом', async () => {
+    const { google, t } = setup();
+    const primary = google.calendars.get('me@gmail.com')!;
+    primary.timeZone = 'Europe/Kaliningrad';
+    await connect(t);
+    expect((await t.call('GET', '/api/google/status')).body.calendarTimezone).toBe(
+      'Europe/Kaliningrad',
+    );
+
+    // Пользователь поправил пояс в Google — сервис узнаёт об этом при следующем чтении занятости.
+    primary.timeZone = 'Europe/Moscow';
+    await draft(t);
+    expect((await t.call('GET', '/api/google/status')).body.calendarTimezone).toBe('Europe/Moscow');
+
+    await t.call('POST', '/api/google/disconnect');
+    expect((await t.call('GET', '/api/google/status')).body.calendarTimezone).toBeNull();
+  });
+});
+
 describe('календарь «Мой университет»', () => {
   it('после подтверждения семестра: свой календарь, события без напоминаний, повтор ничего не дублирует', async () => {
     const { google, t } = setup();

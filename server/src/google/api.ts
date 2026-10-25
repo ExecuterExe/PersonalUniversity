@@ -35,6 +35,8 @@ export interface GoogleCalendarEntry {
   summary: string;
   primary?: boolean;
   accessRole: string;
+  /** Часовой пояс календаря; у основного — пояс, в котором Google показывает события. */
+  timeZone?: string;
 }
 
 interface GoogleTime {

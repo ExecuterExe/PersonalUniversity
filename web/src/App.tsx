@@ -82,6 +82,25 @@ function SemesterBadge({ semester }: { semester: NonNullable<Today['semester']> 
   );
 }
 
+/** Пояс Google не совпадает с поясом сервиса: объяснить сдвиг на примере и где его поправить. */
+function GoogleZoneWarning({ googleZone, today }: { googleZone: string; today: Today }) {
+  const example = today.next?.start ?? today.now;
+  const at = (zone: string, format: string) =>
+    DateTime.fromMillis(example, { zone }).toFormat(format);
+  return (
+    <Alert tone="warning">
+      Google Календарь показывает время по поясу {googleZone} ({at(googleZone, "'UTC'Z")}), а
+      расписание сервиса ведётся по {today.timezone} ({at(today.timezone, "'UTC'Z")}). Поэтому в
+      Google занятия сдвинуты: занятие в {at(today.timezone, 'HH:mm')} там видно в{' '}
+      {at(googleZone, 'HH:mm')}. В сервисе время верное — поправь пояс в Google:{' '}
+      <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noreferrer">
+        Настройки → Общие → Часовой пояс
+      </a>
+      .
+    </Alert>
+  );
+}
+
 function Shell() {
   const { refresh } = useRefresh();
   const { data: today, error } = useApi<Today>('/api/today');
@@ -142,6 +161,12 @@ function Shell() {
   const mine = DateTime.fromMillis(today.now);
   const zoneMismatch = service.offset !== mine.offset;
 
+  // Google показывает занятия в поясе своего основного календаря: если он другой, время там сдвинуто.
+  const googleZone = google?.connected ? google.calendarTimezone : null;
+  const inGoogle = googleZone ? DateTime.fromMillis(today.now, { zone: googleZone }) : null;
+  const googleMismatch =
+    inGoogle !== null && inGoogle.isValid && inGoogle.offset !== service.offset;
+
   const semesterIds =
     today.semester?.disciplines.filter((d) => d.frequency !== null).map((d) => d.id) ?? [];
 
@@ -171,9 +196,18 @@ function Shell() {
           className="stack"
           style={{
             marginBottom:
-              googleResult || google?.needsReauth || google?.lastSyncError || zoneMismatch ? 20 : 0,
+              googleResult ||
+              google?.needsReauth ||
+              google?.lastSyncError ||
+              zoneMismatch ||
+              googleMismatch
+                ? 20
+                : 0,
           }}
         >
+          {googleMismatch && googleZone && (
+            <GoogleZoneWarning googleZone={googleZone} today={today} />
+          )}
           {zoneMismatch && (
             <Alert tone="info">
               Часы компьютера показывают {mine.toFormat('HH:mm')}, а расписание ведётся по поясу{' '}

@@ -208,6 +208,8 @@ export interface GoogleStatus {
   lastSyncAt: Instant | null;
   lastSyncError: string | null;
   busyUpdatedAt: Instant | null;
+  /** Часовой пояс основного календаря Google — в нём Google показывает занятия. */
+  calendarTimezone: string | null;
 }
 
 export interface GoogleCalendar {
