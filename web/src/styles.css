@@ -13,6 +13,7 @@
   /* Карточки — полупрозрачные: сквозь них чуть видно сияние фона. */
   --card-bg: rgba(255, 255, 255, 0.82);
   --card-border: rgba(255, 255, 255, 0.9);
+  --dialog-bg: #ffffff;
 
   --text: #1d1c3b;
   --text-2: #55587a;
@@ -74,6 +75,7 @@
   --border-strong: rgba(255, 255, 255, 0.2);
   --card-bg: rgba(255, 255, 255, 0.05);
   --card-border: rgba(255, 255, 255, 0.09);
+  --dialog-bg: #191b3f;
 
   --text: #eef0ff;
   --text-2: #b7bbe3;
@@ -779,6 +781,18 @@ p {
 
 .btn:active:not(:disabled) {
   transform: translateY(0) scale(0.98);
+}
+
+/* Фокус с клавиатуры — мягкая обводка в цвет сервиса вместо чёрной рамки браузера. */
+.btn:focus-visible,
+.chip:focus-visible,
+.option:focus-visible,
+.sound:focus-visible,
+.segmented button:focus-visible,
+.nav-item:focus-visible,
+.discipline-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .btn:disabled {
@@ -2809,6 +2823,49 @@ input[type='range'] {
 .forecast-line strong {
   margin-left: auto;
   white-space: nowrap;
+}
+
+/* Окно подтверждения */
+
+.confirm {
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--dialog-bg);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.confirm[open] {
+  animation: pop 0.25s var(--ease-out);
+}
+
+.confirm::backdrop {
+  background: rgba(16, 16, 48, 0.35);
+  backdrop-filter: blur(3px);
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+
+.confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px;
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 /* Конфетти после записанного итога */

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
+import { useConfirm } from '../confirm';
 import { useAccent, useColor } from '../colors';
 import { formatHours, formatPercent, local, time } from '../format';
 import { useAction, useApi } from '../hooks';
@@ -388,6 +389,7 @@ export function DecisionsScreen({ today }: { today: Today }) {
   const [choices, setChoices] = useState<Record<string, number>>({});
   const [preview, setPreview] = useState<MakeupPreview | null>(null);
   const { run, error: actionError, busy } = useAction();
+  const confirm = useConfirm();
   const header = (
     <PageHeader
       icon={<Inbox size={24} />}
@@ -424,8 +426,14 @@ export function DecisionsScreen({ today }: { today: Today }) {
   const lead = today.semester?.leadDays ?? 0;
 
   // После отпуска или болезни пропусков много — разобрать их одним действием (раздел 8).
-  const leaveAll = () => {
-    if (!confirm(`Оставить все пропуски (${allMissed.length}) как есть? Отрабатывать их не нужно.`))
+  const leaveAll = async () => {
+    if (
+      !(await confirm({
+        title: `Оставить все пропуски (${allMissed.length}) как есть?`,
+        text: 'Отрабатывать их не нужно.',
+        ok: 'Оставить все',
+      }))
+    )
       return;
     void run(async () => {
       for (const d of allMissed) {
@@ -445,7 +453,7 @@ export function DecisionsScreen({ today }: { today: Today }) {
                 Пропусков: <strong>{allMissed.length}</strong>. Отработай нужные, а остальные можно
                 оставить разом.
               </span>
-              <Button variant="secondary" disabled={busy} onClick={leaveAll}>
+              <Button variant="secondary" disabled={busy} onClick={() => void leaveAll()}>
                 Оставить все как есть
               </Button>
             </div>

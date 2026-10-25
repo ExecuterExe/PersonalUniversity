@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
+import { useConfirm } from '../confirm';
 import { useColor } from '../colors';
 import { BudgetView, SkeletonGrid } from '../components';
 import { formatFrequency, formatHours, local, time } from '../format';
@@ -135,6 +136,7 @@ function SemesterSummary({ sem, zone }: { sem: SemesterView; zone: string }) {
 
 function DraftView({ draft, zone }: { draft: SemesterView; zone: string }) {
   const { run, error, busy } = useAction();
+  const confirm = useConfirm();
   return (
     <>
       <PageHeader
@@ -147,9 +149,13 @@ function DraftView({ draft, zone }: { draft: SemesterView; zone: string }) {
               variant="ghost"
               icon={<Trash2 size={16} />}
               disabled={busy}
-              onClick={() => {
-                if (confirm('Удалить черновик?')) void run(() => api.del('/api/semesters/draft'));
-              }}
+              onClick={() =>
+                void confirm({ title: 'Удалить черновик?', ok: 'Удалить', danger: true }).then(
+                  (yes) => {
+                    if (yes) void run(() => api.del('/api/semesters/draft'));
+                  },
+                )
+              }
             >
               Удалить
             </Button>

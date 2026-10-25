@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
+import { useConfirm } from '../confirm';
 import { useAccent } from '../colors';
 import { formatDuration, formatHours, formatPercent, PRIORITY } from '../format';
 import { useAction, useApi } from '../hooks';
@@ -262,6 +263,7 @@ function DisciplineDetail({
   const { data, error } = useApi<Discipline & { sources: Source[] }>(`/api/disciplines/${id}`);
   const { data: stats } = useApi<Stats | null>('/api/stats');
   const { run, error: actionError } = useAction();
+  const confirm = useConfirm();
   const style = useAccent(id);
   if (!data) return <Loading error={error} height={240} />;
   const progress = stats?.disciplines.find((x) => x.disciplineId === id);
@@ -282,10 +284,15 @@ function DisciplineDetail({
               variant="ghost"
               size="sm"
               icon={<Archive size={15} />}
-              onClick={() => {
-                if (confirm(`Отправить «${data.name}» в архив?`))
-                  void run(() => api.post(`/api/disciplines/${id}/archive`));
-              }}
+              onClick={() =>
+                void confirm({
+                  title: `Отправить «${data.name}» в архив?`,
+                  text: 'Её можно будет вернуть из архива.',
+                  ok: 'В архив',
+                }).then((yes) => {
+                  if (yes) void run(() => api.post(`/api/disciplines/${id}/archive`));
+                })
+              }
             >
               В архив
             </Button>

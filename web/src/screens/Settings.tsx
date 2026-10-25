@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { api } from '../api';
+import { useConfirm } from '../confirm';
 import { WeekdayPicker, WindowsEditor } from '../components';
 import { inputToMinutes, minutesToInput, WEEKDAYS } from '../format';
 import { useAction, useApi } from '../hooks';
@@ -294,6 +295,7 @@ export function GooglePanel() {
   const ready = status?.connected && !status.needsReauth;
   const { data: calendars } = useApi<GoogleCalendar[]>(ready ? '/api/google/calendars' : null);
   const { run, error: actionError, busy } = useAction();
+  const confirm = useConfirm();
   if (!status) return <Loading error={error} />;
 
   if (!status.configured) {
@@ -345,11 +347,16 @@ export function GooglePanel() {
             size="sm"
             icon={<Unplug size={15} />}
             disabled={busy}
-            onClick={() => {
-              if (confirm('Отключить Google Календарь? Занятия перестанут попадать в календарь.')) {
-                void run(() => api.post('/api/google/disconnect'));
-              }
-            }}
+            onClick={() =>
+              void confirm({
+                title: 'Отключить Google Календарь?',
+                text: 'Занятия перестанут попадать в календарь.',
+                ok: 'Отключить',
+                danger: true,
+              }).then((yes) => {
+                if (yes) void run(() => api.post('/api/google/disconnect'));
+              })
+            }
           >
             Отключить
           </Button>

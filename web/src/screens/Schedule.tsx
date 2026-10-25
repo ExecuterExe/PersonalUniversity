@@ -12,6 +12,7 @@ import type { DateTime } from 'luxon';
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api, ApiError, errorText } from '../api';
 import { useAccent, useColor } from '../colors';
+import { useConfirm } from '../confirm';
 import {
   day,
   formatClock,
@@ -121,6 +122,7 @@ function SessionPanel({
   onClose: () => void;
 }) {
   const { refresh } = useRefresh();
+  const confirm = useConfirm();
   const color = useColor(s.disciplineId);
   const [moving, setMoving] = useState(pending !== undefined);
   const [error, setError] = useState<string | null>(null);
@@ -129,9 +131,11 @@ function SessionPanel({
 
   const skip = async () => {
     if (
-      !confirm(
-        `Пропустить «${s.disciplineName}» ${day(s.start, zone)}? Это не будет считаться пропуском.`,
-      )
+      !(await confirm({
+        title: `Пропустить «${s.disciplineName}» ${day(s.start, zone)}?`,
+        text: 'Это не будет считаться пропуском.',
+        ok: 'Пропустить',
+      }))
     )
       return;
     try {

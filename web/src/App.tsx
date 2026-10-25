@@ -11,6 +11,7 @@ import {
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useState } from 'react';
 import { ColorsProvider } from './colors';
+import { ConfirmProvider } from './confirm';
 import { RefreshContext, useApi, useHashRoute, useRefresh } from './hooks';
 import { DecisionsScreen } from './screens/Decisions';
 import { DisciplinesScreen } from './screens/Disciplines';
@@ -209,10 +210,12 @@ export function App() {
   return (
     <RefreshContext.Provider value={{ version, refresh }}>
       <ColorsProvider>
-        <Backdrop />
-        <div className="app">
-          <Shell />
-        </div>
+        <ConfirmProvider>
+          <Backdrop />
+          <div className="app">
+            <Shell />
+          </div>
+        </ConfirmProvider>
       </ColorsProvider>
     </RefreshContext.Provider>
   );

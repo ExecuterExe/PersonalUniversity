@@ -17,6 +17,7 @@ import {
 import { useEffect, useState, type CSSProperties } from 'react';
 import { api } from '../api';
 import { useColor } from '../colors';
+import { useConfirm } from '../confirm';
 import { countdown, local } from '../format';
 import { useAction, useApi, useNow, useRefresh } from '../hooks';
 import { ambience, loadPrefs, savePrefs, SOUNDS, type SoundId, type SoundPrefs } from '../sounds';
@@ -85,13 +86,6 @@ function PhaseRing({ view, totalCycles }: { view: TimerView; totalCycles: number
       refresh();
     }
   }, [phaseLeft, v.sessionId, v.cycle, v.phase, v.paused, refresh]);
-
-  useEffect(() => {
-    document.title = `${countdown(phaseLeft)} · ${PHASE[v.phase]}`;
-    return () => {
-      document.title = 'Мой университет';
-    };
-  }, [phaseLeft, v.phase]);
 
   // Светящаяся «голова» дуги — там, где сейчас время.
   const angle = share * 2 * Math.PI;
@@ -374,6 +368,7 @@ export function FocusView({ timer }: { timer: TimerView }) {
   const { data: settings } = useApi<AppSettings>('/api/settings');
   const color = useColor(details?.session.disciplineId ?? '');
   const { run, error: actionError, busy } = useAction();
+  const confirm = useConfirm();
   const pomodoro = settings?.pomodoro;
   const totalCycles = pomodoro
     ? Math.ceil(timer.plannedMs / ((pomodoro.focusMinutes + pomodoro.breakMinutes) * 60_000))
@@ -381,9 +376,17 @@ export function FocusView({ timer }: { timer: TimerView }) {
   const key = `${timer.activeMs}-${timer.paused}`;
   useWakeLock(!timer.paused);
 
-  const finish = () => {
+  const finish = async () => {
     const early = timer.plannedMs - timer.activeMs > 60_000;
-    if (early && !confirm('Завершить раньше времени? Запишется, сколько было на самом деле.'))
+    if (
+      early &&
+      !(await confirm({
+        title: 'Завершить раньше времени?',
+        text: 'Запишется, сколько ты занимался на самом деле.',
+        ok: 'Завершить',
+        cancel: 'Продолжить заниматься',
+      }))
+    )
       return;
     void run(() => api.post('/api/timer/finish'));
   };
@@ -437,7 +440,7 @@ export function FocusView({ timer }: { timer: TimerView }) {
             variant="ghost"
             icon={<Square size={16} />}
             disabled={busy}
-            onClick={finish}
+            onClick={() => void finish()}
           >
             Завершить
           </Button>
