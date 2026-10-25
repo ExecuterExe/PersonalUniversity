@@ -1,5 +1,6 @@
 import {
   CalendarClock,
+  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -287,6 +288,7 @@ export function ScheduleScreen({ today }: { today: Today }) {
 
   const header = (
     <PageHeader
+      icon={<CalendarDays size={24} />}
       title="Расписание"
       subtitle={`${monday.setLocale('ru').toFormat('d MMMM')} — ${monday.plus({ days: 6 }).setLocale('ru').toFormat('d MMMM')}`}
       actions={

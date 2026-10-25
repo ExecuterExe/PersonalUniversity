@@ -138,6 +138,7 @@ function DraftView({ draft, zone }: { draft: SemesterView; zone: string }) {
   return (
     <>
       <PageHeader
+        icon={<Layers size={24} />}
         title="Черновик семестра"
         subtitle={`${dateLabel(draft.startDate)} — ${dateLabel(draft.endDate)}. Пока не подтвердишь, в календаре ничего не появится.`}
         actions={
@@ -454,6 +455,7 @@ export function SemesterScreen({ today }: { today: Today }) {
     return (
       <>
         <PageHeader
+          icon={<Layers size={24} />}
           title="Семестр"
           subtitle={`${dateLabel(sem.startDate)} — ${dateLabel(sem.endDate)}`}
           actions={<Badge tone="success">идёт</Badge>}
@@ -475,7 +477,7 @@ export function SemesterScreen({ today }: { today: Today }) {
       <DraftView draft={draft} zone={zone} />
     ) : (
       <>
-        <PageHeader title="Черновик семестра" />
+        <PageHeader icon={<Layers size={24} />} title="Черновик семестра" />
         <Loading error={error} height={300} />
       </>
     );
@@ -483,6 +485,7 @@ export function SemesterScreen({ today }: { today: Today }) {
   return (
     <>
       <PageHeader
+        icon={<Layers size={24} />}
         title="Новый семестр"
         subtitle="Выбери даты и дисциплины — расписание составится вокруг календаря"
       />

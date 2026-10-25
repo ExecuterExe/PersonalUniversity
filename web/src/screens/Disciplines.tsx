@@ -432,6 +432,7 @@ export function DisciplinesScreen({
   return (
     <>
       <PageHeader
+        icon={<BookOpen size={24} />}
         title="Дисциплины"
         subtitle="Что изучаешь, зачем и по каким материалам"
         actions={

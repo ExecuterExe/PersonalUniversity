@@ -1,12 +1,18 @@
-/* Дизайн-система «Мой университет»: белый, синий, фиолетовый; спокойно и приятно. */
+/*
+ * Дизайн-система «Мой университет»: белый, синий, фиолетовый.
+ * Днём — светлое стекло на мягком «сиянии»; во время занятия — тёмный режим погружения.
+ */
 
 :root {
-  --bg: #f6f6fc;
+  --bg: #f4f5fd;
   --surface: #ffffff;
   --surface-2: #f3f3fb;
   --surface-3: #ebebf7;
   --border: #e5e6f1;
   --border-strong: #d4d6e8;
+  /* Карточки — полупрозрачные: сквозь них чуть видно сияние фона. */
+  --card-bg: rgba(255, 255, 255, 0.82);
+  --card-border: rgba(255, 255, 255, 0.9);
 
   --text: #1d1c3b;
   --text-2: #55587a;
@@ -18,7 +24,9 @@
   --violet: #7b5ce8;
   --violet-soft: #f2edfe;
   --gradient: linear-gradient(135deg, #4f6cf2 0%, #7b5ce8 100%);
+  --gradient-vivid: linear-gradient(125deg, #3d5af1 0%, #5a5cf2 38%, #8a5cf0 72%, #b264e6 100%);
   --gradient-soft: linear-gradient(135deg, #eef1ff 0%, #f4eeff 100%);
+  --gradient-text: linear-gradient(100deg, #1d1c3b 0%, #3640b8 55%, #7b5ce8 100%);
 
   --success: #1d9a6c;
   --success-soft: #e5f6ee;
@@ -27,13 +35,22 @@
   --danger: #d4405c;
   --danger-soft: #fdebef;
 
-  --radius-lg: 20px;
-  --radius: 16px;
+  --glow-1: rgba(92, 116, 255, 0.34);
+  --glow-2: rgba(150, 108, 255, 0.28);
+  --glow-3: rgba(56, 189, 248, 0.2);
+  --dots: rgba(79, 95, 232, 0.13);
+
+  --radius-lg: 24px;
+  --radius: 18px;
   --radius-sm: 12px;
   --radius-xs: 8px;
   --shadow-sm: 0 1px 2px rgba(29, 28, 59, 0.05);
-  --shadow: 0 1px 2px rgba(29, 28, 59, 0.04), 0 8px 24px rgba(79, 95, 232, 0.07);
-  --shadow-lg: 0 16px 48px rgba(79, 95, 232, 0.16);
+  --shadow: 0 1px 2px rgba(29, 28, 59, 0.04), 0 10px 30px -6px rgba(79, 95, 232, 0.12);
+  --shadow-hover: 0 2px 4px rgba(29, 28, 59, 0.05), 0 18px 40px -8px rgba(79, 95, 232, 0.22);
+  --shadow-lg: 0 24px 60px -12px rgba(79, 95, 232, 0.35);
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   --font: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Manrope Variable', 'Inter Variable', system-ui, sans-serif;
@@ -46,6 +63,48 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Режим погружения: идёт занятие — «выключаем свет», остаются кольцо таймера и звёзды. */
+:root.immersive {
+  color-scheme: dark;
+  --bg: #0b0c24;
+  --surface: rgba(255, 255, 255, 0.07);
+  --surface-2: rgba(255, 255, 255, 0.08);
+  --surface-3: rgba(255, 255, 255, 0.13);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --card-bg: rgba(255, 255, 255, 0.05);
+  --card-border: rgba(255, 255, 255, 0.09);
+
+  --text: #eef0ff;
+  --text-2: #b7bbe3;
+  --text-3: #8b90bf;
+
+  --primary: #8c9cff;
+  --primary-hover: #a3b0ff;
+  --primary-soft: rgba(124, 140, 255, 0.16);
+  --violet: #b6a1ff;
+  --violet-soft: rgba(160, 130, 255, 0.16);
+  --gradient-soft: linear-gradient(135deg, rgba(110, 130, 255, 0.18), rgba(160, 120, 255, 0.18));
+  --gradient-text: linear-gradient(100deg, #ffffff 0%, #c9d0ff 55%, #c8b6ff 100%);
+
+  --success: #4fd6a1;
+  --success-soft: rgba(79, 214, 161, 0.14);
+  --warning: #f3b851;
+  --warning-soft: rgba(243, 184, 81, 0.14);
+  --danger: #ff7b93;
+  --danger-soft: rgba(255, 123, 147, 0.14);
+
+  --glow-1: rgba(80, 96, 255, 0.4);
+  --glow-2: rgba(140, 80, 255, 0.34);
+  --glow-3: rgba(40, 150, 255, 0.18);
+  --dots: rgba(255, 255, 255, 0.05);
+
+  --shadow-sm: none;
+  --shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 16px 40px -12px rgba(0, 0, 0, 0.5);
+  --shadow-hover: var(--shadow);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
 *,
 *::before,
 *::after {
@@ -55,6 +114,110 @@
 body {
   margin: 0;
   background: var(--bg);
+  transition: background-color 0.8s ease;
+}
+
+/* Фон: медленно плывущее сияние, точечная сетка и — в режиме погружения — звёзды. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--dots) 1px, transparent 1.5px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse 80% 60% at 70% 0%, #000 0%, transparent 70%);
+}
+
+.backdrop .glow {
+  position: absolute;
+  width: 62vmax;
+  height: 62vmax;
+  border-radius: 50%;
+  will-change: transform;
+  animation: drift 40s ease-in-out infinite alternate;
+  transition: background 0.8s ease;
+}
+
+.backdrop .g1 {
+  top: -28vmax;
+  right: -14vmax;
+  background: radial-gradient(closest-side, var(--glow-1), transparent);
+}
+
+.backdrop .g2 {
+  bottom: -32vmax;
+  left: -12vmax;
+  background: radial-gradient(closest-side, var(--glow-2), transparent);
+  animation-duration: 48s;
+  animation-delay: -14s;
+}
+
+.backdrop .g3 {
+  top: 28%;
+  left: 38%;
+  width: 42vmax;
+  height: 42vmax;
+  background: radial-gradient(closest-side, var(--glow-3), transparent);
+  animation-duration: 56s;
+  animation-delay: -30s;
+}
+
+.backdrop .stars {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  background-image:
+    radial-gradient(1.5px 1.5px at 12% 18%, #fff, transparent),
+    radial-gradient(1px 1px at 27% 72%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 41% 33%, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(1px 1px at 58% 84%, #fff, transparent),
+    radial-gradient(2px 2px at 66% 12%, rgba(200, 210, 255, 0.9), transparent),
+    radial-gradient(1px 1px at 79% 47%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 88% 78%, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(1px 1px at 93% 22%, #fff, transparent),
+    radial-gradient(1px 1px at 6% 56%, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(1.5px 1.5px at 35% 91%, rgba(210, 200, 255, 0.9), transparent);
+  background-size: 640px 640px;
+}
+
+:root.immersive .backdrop .stars {
+  opacity: 1;
+  animation: twinkle 6s ease-in-out infinite alternate;
+}
+
+@keyframes drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-6vmax, 5vmax, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(5vmax, -3vmax, 0) scale(0.94);
+  }
+}
+
+@keyframes twinkle {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.app {
+  position: relative;
+  z-index: 1;
 }
 
 a {
@@ -79,8 +242,16 @@ h3 {
 }
 
 h1 {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  width: fit-content;
+  padding-bottom: 2px;
+  background: var(--gradient-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 h2 {
@@ -117,8 +288,9 @@ p {
   flex-direction: column;
   gap: 4px;
   padding: 24px 16px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
+  background: var(--card-bg);
+  border-right: 1px solid var(--card-border);
+  box-shadow: 1px 0 0 var(--border);
 }
 
 .brand {
@@ -133,17 +305,54 @@ p {
 }
 
 .brand-mark {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: var(--gradient);
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  background: var(--gradient-vivid);
   color: #fff;
-  box-shadow: 0 6px 16px rgba(79, 95, 232, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 8px 20px -4px rgba(79, 95, 232, 0.55);
+  overflow: hidden;
+}
+
+/* Блик, который иногда пробегает по значку. */
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background: linear-gradient(
+    115deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 60%
+  );
+  transform: translateX(-100%);
+  animation: sheen 7s ease-in-out infinite;
+}
+
+@keyframes sheen {
+  0%,
+  70% {
+    transform: translateX(-100%);
+  }
+  85%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -152,8 +361,14 @@ p {
   color: var(--text-2);
   font-weight: 500;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background 0.2s,
+    color 0.2s,
+    box-shadow 0.2s;
+}
+
+.nav-item svg {
+  flex: none;
+  transition: transform 0.25s var(--ease-spring);
 }
 
 .nav-item:hover {
@@ -162,10 +377,15 @@ p {
   text-decoration: none;
 }
 
+.nav-item:hover svg {
+  transform: scale(1.12) rotate(-6deg);
+}
+
 .nav-item.active {
-  background: var(--primary-soft);
-  color: var(--primary);
+  background: var(--gradient);
+  color: #fff;
   font-weight: 600;
+  box-shadow: 0 8px 20px -6px rgba(79, 95, 232, 0.6);
 }
 
 .nav-item .count {
@@ -173,26 +393,45 @@ p {
   min-width: 22px;
   padding: 1px 7px;
   border-radius: 999px;
-  background: var(--danger);
+  background: linear-gradient(135deg, #f0577a, #d4405c);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
   text-align: center;
+  box-shadow: 0 4px 10px -2px rgba(212, 64, 92, 0.5);
+}
+
+.nav-item.active .count {
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: none;
 }
 
 .sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-top: auto;
-  padding: 12px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--gradient-soft);
   font-size: 13px;
   color: var(--text-2);
 }
 
+.sidebar-footer strong {
+  color: var(--text);
+  font-family: var(--font-display);
+}
+
+.sidebar-footer .progress {
+  height: 6px;
+  background: rgba(79, 95, 232, 0.12);
+}
+
 .main {
   width: 100%;
-  max-width: 1200px;
-  padding: 32px 40px 64px;
+  max-width: 1240px;
+  padding: 36px 44px 72px;
 }
 
 .page-header {
@@ -201,12 +440,69 @@ p {
   align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 24px;
+  margin-bottom: 26px;
+  animation: rise 0.4s var(--ease-out) backwards;
 }
 
 .page-header .subtitle {
-  margin-top: 4px;
+  margin-top: 6px;
   color: var(--text-2);
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Значок раздела рядом с заголовком; у приветствия — время суток, оно чуть покачивается. */
+.page-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: var(--gradient-vivid);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 10px 24px -6px rgba(90, 92, 242, 0.55);
+}
+
+.page-icon .sway {
+  animation: sway 6s ease-in-out infinite;
+}
+
+@keyframes sway {
+  0%,
+  100% {
+    transform: rotate(-8deg);
+  }
+  50% {
+    transform: rotate(8deg);
+  }
+}
+
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 @media (max-width: 900px) {
@@ -330,12 +626,13 @@ p {
 /* Карточки */
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  position: relative;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 20px 22px;
-  animation: rise 0.25s ease both;
+  animation: rise 0.45s var(--ease-out) backwards;
 }
 
 .card.flat {
@@ -345,6 +642,51 @@ p {
 .card.tinted {
   background: var(--gradient-soft);
   border-color: transparent;
+  overflow: hidden;
+}
+
+.card.tinted::after {
+  content: '';
+  position: absolute;
+  right: -40px;
+  top: -40px;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(123, 92, 232, 0.22), transparent);
+  pointer-events: none;
+}
+
+/* Карточки появляются по очереди, а не все разом. */
+.stack-lg > :nth-child(2),
+.grid-4 > :nth-child(2),
+.grid-3 > :nth-child(2),
+.grid-2 > :nth-child(2) {
+  animation-delay: 0.06s;
+}
+
+.stack-lg > :nth-child(3),
+.grid-4 > :nth-child(3),
+.grid-3 > :nth-child(3),
+.grid-2 > :nth-child(3) {
+  animation-delay: 0.12s;
+}
+
+.stack-lg > :nth-child(4),
+.grid-4 > :nth-child(4),
+.grid-3 > :nth-child(4),
+.grid-2 > :nth-child(4) {
+  animation-delay: 0.18s;
+}
+
+.stack-lg > :nth-child(n + 5),
+.grid-3 > :nth-child(n + 5),
+.grid-2 > :nth-child(n + 5) {
+  animation-delay: 0.24s;
+}
+
+.split > :nth-child(2) > :first-child {
+  animation-delay: 0.1s;
 }
 
 .card-head {
@@ -364,7 +706,7 @@ p {
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(12px) scale(0.985);
   }
   to {
     opacity: 1;
@@ -375,6 +717,7 @@ p {
 /* Кнопки */
 
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -387,21 +730,55 @@ p {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(79, 95, 232, 0.25);
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 6px 16px -4px rgba(79, 95, 232, 0.45);
   transition:
-    transform 0.12s,
-    box-shadow 0.15s,
-    background 0.15s,
-    opacity 0.15s;
+    transform 0.2s var(--ease-out),
+    box-shadow 0.2s,
+    background 0.2s,
+    border-color 0.2s,
+    color 0.2s,
+    opacity 0.2s;
+}
+
+/* Блик, пробегающий по главной кнопке при наведении. */
+.btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  transition: transform 0.6s var(--ease-out);
+}
+
+.btn:hover:not(:disabled)::after {
+  transform: translateX(120%);
+}
+
+.btn.secondary::after,
+.btn.ghost::after,
+.btn.danger::after {
+  display: none;
 }
 
 .btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(79, 95, 232, 0.32);
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 12px 24px -6px rgba(79, 95, 232, 0.55);
 }
 
 .btn:active:not(:disabled) {
-  transform: none;
+  transform: translateY(0) scale(0.98);
 }
 
 .btn:disabled {
@@ -760,7 +1137,25 @@ p {
   height: 100%;
   border-radius: 999px;
   background: var(--gradient);
-  transition: width 0.4s ease;
+  transform-origin: left;
+  transition: width 0.6s var(--ease-out);
+  animation: fill-x 1s var(--ease-out) both;
+}
+
+/* Полосы «наливаются» при появлении. */
+@keyframes fill-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes reveal-x {
+  from {
+    clip-path: inset(0 100% 0 0 round 999px);
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 999px);
+  }
 }
 
 .stacked {
@@ -769,6 +1164,7 @@ p {
   border-radius: 999px;
   overflow: hidden;
   background: var(--surface-3);
+  animation: reveal-x 1s var(--ease-out) both;
 }
 
 .stacked > span {
@@ -796,19 +1192,52 @@ p {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow: hidden;
+  transition:
+    transform 0.25s var(--ease-out),
+    box-shadow 0.25s;
+}
+
+.stat:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-hover);
+}
+
+/* Мягкое свечение в углу плитки. */
+.stat::before {
+  content: '';
+  position: absolute;
+  right: -50px;
+  top: -50px;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(110, 120, 255, 0.16), transparent);
+  pointer-events: none;
 }
 
 .stat .label {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 6px;
   color: var(--text-2);
   font-size: 13px;
   font-weight: 600;
 }
 
+.stat-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--gradient-soft);
+}
+
 .stat .value {
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 650;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -869,11 +1298,26 @@ p {
 .empty .empty-icon {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 18px;
-  background: var(--gradient-soft);
-  color: var(--violet);
+  width: 64px;
+  height: 64px;
+  margin-bottom: 4px;
+  border-radius: 20px;
+  background: var(--gradient-vivid);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 14px 30px -8px rgba(90, 92, 242, 0.55);
+  animation: float 5s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(3deg);
+  }
 }
 
 .skeleton {
@@ -948,48 +1392,218 @@ p {
 
 .hero {
   position: relative;
-  padding: 26px 28px;
+  isolation: isolate;
+  container-type: inline-size;
+  padding: 30px 32px;
   border-radius: var(--radius-lg);
-  background: var(--gradient);
+  background: var(--gradient-vivid);
   color: #fff;
-  box-shadow: var(--shadow-lg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 30px 60px -20px rgba(80, 80, 230, 0.6);
   overflow: hidden;
-  animation: rise 0.3s ease both;
+  animation: rise 0.5s var(--ease-out) backwards;
 }
 
-.hero::after {
+/* Рисунок героя: плывущие пятна света и орбиты со «спутниками». */
+.hero-art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.hero-art .orb {
+  position: absolute;
+  border-radius: 50%;
+  will-change: transform;
+}
+
+.hero-art .o1 {
+  right: -80px;
+  top: -120px;
+  width: 360px;
+  height: 360px;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.28), transparent);
+  animation: drift-small 14s ease-in-out infinite alternate;
+}
+
+.hero-art .o2 {
+  left: -120px;
+  bottom: -160px;
+  width: 380px;
+  height: 380px;
+  background: radial-gradient(closest-side, rgba(56, 189, 248, 0.45), transparent);
+  animation: drift-small 18s ease-in-out infinite alternate-reverse;
+}
+
+.hero-art .o3 {
+  left: 45%;
+  top: -60%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(closest-side, rgba(244, 114, 182, 0.35), transparent);
+  animation: drift-small 22s ease-in-out infinite alternate;
+}
+
+.hero-art .orbits {
+  position: absolute;
+  right: -110px;
+  top: 50%;
+  width: 420px;
+  height: 420px;
+  transform: translateY(-50%);
+  opacity: 0.9;
+}
+
+.hero-art .orbits circle.path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 1;
+}
+
+.hero-art .orbits .spin {
+  transform-origin: 210px 210px;
+  animation: spin 26s linear infinite;
+}
+
+.hero-art .orbits .spin.slow {
+  animation-duration: 44s;
+  animation-direction: reverse;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes drift-small {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-40px, 30px, 0) scale(1.1);
+  }
+}
+
+.hero-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+}
+
+.hero-body {
+  min-width: 0;
+}
+
+.eyebrow-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7dffc4;
+  box-shadow: 0 0 10px #7dffc4;
+}
+
+.live-dot::after {
   content: '';
   position: absolute;
-  right: -60px;
-  top: -60px;
-  width: 220px;
-  height: 220px;
+  inset: -4px;
+  border: 2px solid #7dffc4;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.09);
+  animation: ping 1.8s var(--ease-out) infinite;
 }
 
-.hero .eyebrow {
-  font-size: 13px;
-  font-weight: 600;
-  opacity: 0.85;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+.live-dot.calm {
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+}
+
+.live-dot.calm::after {
+  display: none;
+}
+
+@keyframes ping {
+  from {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  to {
+    transform: scale(2.2);
+    opacity: 0;
+  }
 }
 
 .hero h2 {
-  margin: 6px 0 4px;
-  font-size: 30px;
+  margin: 14px 0 12px;
+  font-size: clamp(28px, 7cqi, 42px);
   font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+  text-shadow: 0 2px 20px rgba(30, 20, 120, 0.25);
 }
 
-.hero .meta {
-  opacity: 0.9;
+.hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hero .goal {
+  display: flex;
+  gap: 8px;
+  max-width: 560px;
+  margin-top: 14px;
+  font-size: 14px;
+  opacity: 0.92;
+}
+
+.hero .goal svg {
+  flex: none;
+  margin-top: 2px;
 }
 
 .hero .btn {
   background: #fff;
-  color: var(--primary);
-  box-shadow: 0 6px 18px rgba(20, 20, 60, 0.18);
+  color: #3d47d9;
+  box-shadow: 0 10px 30px -6px rgba(20, 20, 80, 0.45);
+}
+
+.hero .btn::after {
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    rgba(123, 92, 232, 0.18) 50%,
+    transparent 70%
+  );
 }
 
 .hero .btn.ghost {
@@ -997,12 +1611,256 @@ p {
   color: #fff;
 }
 
+/* Пора начинать — кнопка мягко «дышит» светом. */
+.hero .btn.beckon {
+  animation: beckon 2.4s ease-in-out infinite;
+}
+
+@keyframes beckon {
+  0%,
+  100% {
+    box-shadow:
+      0 10px 30px -6px rgba(20, 20, 80, 0.45),
+      0 0 0 0 rgba(255, 255, 255, 0.55);
+  }
+  50% {
+    box-shadow:
+      0 10px 30px -6px rgba(20, 20, 80, 0.45),
+      0 0 0 12px rgba(255, 255, 255, 0);
+  }
+}
+
 .hero .hint {
-  margin-top: 14px;
-  padding: 10px 12px;
+  display: flex;
+  gap: 10px;
+  max-width: 560px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.12);
   font-size: 14px;
+}
+
+.hero .hint svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.hero-note {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+/* Отсчёт до начала: стеклянная плашка справа. */
+.hero-clock {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 170px;
+  padding: 18px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  text-align: center;
+}
+
+.hero-clock .label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.hero-clock .big {
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-clock .sub {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+/* Узкий герой (телефон или узкая колонка): отсчёт — полосой под текстом. */
+@container (max-width: 560px) {
+  .hero-inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .hero-clock {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 10px;
+    min-width: 0;
+    padding: 12px 16px;
+  }
+
+  .hero-clock .big {
+    font-size: 28px;
+  }
+
+  .hero-art .orbits {
+    right: -220px;
+    opacity: 0.5;
+  }
+}
+
+@media (max-width: 700px) {
+  .hero {
+    padding: 24px 22px;
+  }
+}
+
+/* Таймлайн дня */
+
+.timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 81px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--border-strong), var(--border) 80%, transparent);
+}
+
+.tl-item {
+  display: grid;
+  grid-template-columns: 58px 46px minmax(0, 1fr);
+  align-items: center;
+  animation: rise 0.45s var(--ease-out) backwards;
+}
+
+.tl-item:nth-child(2) {
+  animation-delay: 0.08s;
+}
+
+.tl-item:nth-child(3) {
+  animation-delay: 0.16s;
+}
+
+.tl-time {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-right: 4px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 16px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.tl-time small {
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tl-node {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--card-bg);
+  border-radius: 50%;
+  background: var(--accent, var(--primary));
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--accent-soft, var(--primary-soft));
+}
+
+.tl-item.next .tl-node::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border: 2px solid var(--accent, var(--primary));
+  border-radius: 50%;
+  animation: ping 2s var(--ease-out) infinite;
+}
+
+.tl-item.held .tl-node {
+  background: var(--success);
+  box-shadow: 0 0 0 2px var(--success-soft);
+}
+
+.tl-item.missed .tl-node,
+.tl-item.skipped .tl-node,
+.tl-item.cancelled .tl-node {
+  background: var(--text-3);
+  box-shadow: 0 0 0 2px var(--surface-3);
+}
+
+.tl-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  min-width: 0;
+  padding: 12px 14px 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  transition:
+    transform 0.25s var(--ease-out),
+    box-shadow 0.25s,
+    border-color 0.25s;
+}
+
+.tl-card:hover {
+  transform: translateX(3px);
+  box-shadow: var(--shadow);
+}
+
+.tl-item.next .tl-card {
+  border-color: var(--accent, var(--primary));
+  background:
+    linear-gradient(90deg, var(--accent-soft, var(--primary-soft)), transparent 70%), var(--surface);
+  box-shadow: 0 10px 24px -12px var(--accent, var(--primary));
+}
+
+.tl-item.missed .tl-card,
+.tl-item.skipped .tl-card,
+.tl-item.cancelled .tl-card {
+  opacity: 0.6;
+}
+
+.tl-card .grow {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 /* Режим погружения */
@@ -1021,25 +1879,102 @@ p {
 }
 
 .focus-stage {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 18px;
   padding: 32px 24px;
   border-radius: var(--radius-lg);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 38%, rgba(110, 100, 255, 0.16), transparent 70%),
+    var(--card-bg);
+  border: 1px solid var(--card-border);
   box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: rise 0.6s var(--ease-out) backwards;
+}
+
+.focus-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.focus-title .eyebrow {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.focus-title h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.focus-title .dot {
+  width: 12px;
+  height: 12px;
+  box-shadow: 0 0 14px var(--accent, var(--primary));
 }
 
 .ring {
   position: relative;
-  width: 280px;
-  height: 280px;
+  width: min(330px, 100%);
+  aspect-ratio: 1;
+  --halo: rgba(124, 108, 255, 0.62);
+}
+
+.ring.break {
+  --halo: rgba(40, 200, 170, 0.45);
+}
+
+/* Ореол за кольцом медленно «дышит»: вдох-выдох около 8 секунд. */
+.ring::before {
+  content: '';
+  position: absolute;
+  inset: -2%;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--halo), transparent);
+  animation: breathe 8s ease-in-out infinite;
+}
+
+.ring.paused::before {
+  animation: none;
+  opacity: 0.35;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(0.86);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
 }
 
 .ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
   transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.ring .ring-ticks {
+  stroke: var(--border-strong);
 }
 
 .ring .ring-track {
@@ -1048,6 +1983,15 @@ p {
 
 .ring .ring-fill {
   transition: stroke-dashoffset 0.5s linear;
+  filter: drop-shadow(0 0 8px var(--halo));
+}
+
+.ring .ring-head {
+  fill: #fff;
+  filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 14px var(--halo));
+  transition:
+    cx 0.5s linear,
+    cy 0.5s linear;
 }
 
 .ring .ring-center {
@@ -1057,20 +2001,54 @@ p {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 8px;
 }
 
 .ring .countdown {
   font-family: var(--font-display);
-  font-size: 58px;
+  font-size: clamp(48px, 13vw, 68px);
   font-weight: 800;
-  letter-spacing: -0.03em;
+  line-height: 1;
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
+  background: var(--gradient-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .ring .phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
   color: var(--text-2);
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ring .phase::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 8px var(--primary);
+}
+
+.ring.break .phase::before {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+.ring.paused .phase::before {
+  background: var(--warning);
+  box-shadow: none;
 }
 
 .cycles {
@@ -1079,10 +2057,11 @@ p {
 }
 
 .cycles span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  width: 22px;
+  height: 6px;
+  border-radius: 999px;
   background: var(--surface-3);
+  transition: all 0.4s var(--ease-out);
 }
 
 .cycles span.done {
@@ -1090,8 +2069,9 @@ p {
 }
 
 .cycles span.now {
-  background: var(--primary);
-  box-shadow: 0 0 0 4px var(--primary-soft);
+  width: 36px;
+  background: var(--gradient);
+  box-shadow: 0 0 12px rgba(124, 140, 255, 0.7);
 }
 
 /* Звуки */
@@ -1116,17 +2096,37 @@ p {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.25s var(--ease-out);
 }
 
 .sound:hover {
   border-color: var(--border-strong);
+  transform: translateY(-2px);
+}
+
+.sound svg {
+  transition: transform 0.3s var(--ease-spring);
 }
 
 .sound.on {
-  border-color: transparent;
+  border-color: rgba(150, 130, 255, 0.45);
   background: var(--gradient-soft);
   color: var(--violet);
+  box-shadow: 0 8px 22px -10px rgba(123, 92, 232, 0.8);
+}
+
+.sound.on svg {
+  animation: bob 2.6s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
 }
 
 .sound input[type='range'] {
@@ -1179,8 +2179,9 @@ input[type='range'] {
   min-width: 32px;
   height: 32px;
   border-radius: 10px;
-  background: var(--gradient);
+  background: var(--gradient-vivid);
   color: #fff;
+  box-shadow: 0 6px 14px -4px rgba(90, 92, 242, 0.6);
 }
 
 .week-grid .hours {
@@ -1202,7 +2203,7 @@ input[type='range'] {
 }
 
 .week-grid .day-col.today {
-  background-color: #fafaff;
+  background-color: rgba(79, 95, 232, 0.035);
 }
 
 .block {
@@ -1213,21 +2214,24 @@ input[type='range'] {
   border: none;
   border-left: 4px solid var(--accent);
   border-radius: 10px;
-  background: var(--accent-soft);
+  background: linear-gradient(160deg, var(--accent-soft) 40%, rgba(255, 255, 255, 0.9));
+  box-shadow: 0 1px 2px rgba(29, 28, 59, 0.06);
   color: var(--text);
   font: inherit;
   font-size: 13px;
   text-align: left;
   cursor: pointer;
   overflow: hidden;
+  animation: rise 0.4s var(--ease-out) backwards;
   transition:
-    transform 0.12s,
-    box-shadow 0.15s;
+    transform 0.2s var(--ease-out),
+    box-shadow 0.2s;
 }
 
 .block:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow);
+  z-index: 2;
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 12px 24px -10px var(--accent);
 }
 
 .block strong {
@@ -1287,19 +2291,25 @@ input[type='range'] {
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--danger);
+  background: linear-gradient(90deg, var(--danger), rgba(212, 64, 92, 0.25));
+  box-shadow: 0 0 8px rgba(212, 64, 92, 0.5);
   z-index: 2;
 }
 
-.now-line::before {
+.now-line::before,
+.now-line::after {
   content: '';
   position: absolute;
-  left: -4px;
-  top: -3px;
-  width: 8px;
-  height: 8px;
+  left: -5px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--danger);
+}
+
+.now-line::after {
+  animation: ping 2s var(--ease-out) infinite;
 }
 
 /* Мастер */
@@ -1349,39 +2359,59 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 18px 18px 16px;
-  border: 1px solid var(--border);
+  padding: 20px 18px 16px;
+  border: 1px solid var(--card-border);
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  background:
+    radial-gradient(circle at 100% 0%, var(--accent-soft), transparent 55%), var(--card-bg);
+  box-shadow: var(--shadow);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+  overflow: hidden;
+  animation: rise 0.45s var(--ease-out) backwards;
   transition:
-    transform 0.12s,
-    box-shadow 0.15s,
-    border-color 0.15s;
+    transform 0.25s var(--ease-out),
+    box-shadow 0.25s,
+    border-color 0.25s;
+}
+
+/* Полоска цвета дисциплины сверху. */
+.discipline-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: var(--accent);
 }
 
 .discipline-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow);
+  transform: translateY(-4px);
+  box-shadow: 0 18px 36px -14px var(--accent);
 }
 
 .discipline-card.on {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    0 18px 36px -14px var(--accent);
 }
 
 .discipline-card .swatch {
-  width: 36px;
-  height: 36px;
-  border-radius: 11px;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 18px -6px var(--accent);
+  transition: transform 0.3s var(--ease-spring);
+}
+
+.discipline-card:hover .swatch {
+  transform: rotate(-8deg) scale(1.08);
 }
 
 .discipline-card .goal {
@@ -1489,6 +2519,31 @@ input[type='range'] {
   width: min(36px, 70%);
   border-radius: 4px 4px 0 0;
   overflow: hidden;
+  transform-origin: bottom;
+  animation: fill-y 0.9s var(--ease-out) backwards;
+  transition: filter 0.2s;
+}
+
+.wchart-col:nth-child(2) .wchart-stack {
+  animation-delay: 0.05s;
+}
+
+.wchart-col:nth-child(3) .wchart-stack {
+  animation-delay: 0.1s;
+}
+
+.wchart-col:nth-child(n + 4) .wchart-stack {
+  animation-delay: 0.15s;
+}
+
+.wchart-col:hover .wchart-stack {
+  filter: brightness(1.08) saturate(1.1);
+}
+
+@keyframes fill-y {
+  from {
+    transform: scaleY(0);
+  }
 }
 
 .wchart-stack span {
@@ -1609,7 +2664,7 @@ input[type='range'] {
   bottom: 24px;
   width: min(380px, calc(100vw - 32px));
   z-index: 10;
-  animation: rise 0.2s ease both;
+  animation: rise 0.2s ease backwards;
 }
 
 .toast {
@@ -1624,4 +2679,278 @@ input[type='range'] {
   color: #fff;
   font-size: 14px;
   box-shadow: var(--shadow-lg);
+}
+
+/* Плавающая панель занятия — непрозрачная, чтобы сетка недели под ней не мешала читать. */
+.panel .card {
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Кольцо «Как идёт семестр» */
+
+.card:has(.pulse) {
+  container-type: inline-size;
+}
+
+.pulse {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+}
+
+/* В узкой колонке кольцо встаёт над цифрами, чтобы подписи не наезжали на значения. */
+@container (max-width: 400px) {
+  .pulse {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .mini-stats {
+    width: 100%;
+  }
+}
+
+.meter-ring {
+  position: relative;
+  width: 112px;
+  height: 112px;
+}
+
+.meter-ring svg {
+  display: block;
+  transform: rotate(-90deg);
+}
+
+.meter-ring .track {
+  stroke: var(--surface-3);
+}
+
+.meter-ring .fill {
+  stroke-linecap: round;
+  animation: ring-in 1.4s var(--ease-out) backwards;
+}
+
+@keyframes ring-in {
+  from {
+    stroke-dashoffset: var(--full);
+  }
+}
+
+.meter-ring .center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+}
+
+.meter-ring .center strong {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.meter-ring .center span {
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mini-stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.mini-stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.mini-stat .ico {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--gradient-soft);
+}
+
+.mini-stat .grow {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-2);
+}
+
+.mini-stat strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.forecast-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--gradient-soft);
+  font-size: 14px;
+}
+
+.forecast-line strong {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Конфетти после записанного итога */
+
+.confetti {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.cheer {
+  position: fixed;
+  left: 50%;
+  top: 28%;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 28px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 22px;
+  background: var(--gradient-vivid);
+  color: #fff;
+  box-shadow: 0 30px 60px -16px rgba(80, 80, 230, 0.7);
+  text-align: center;
+  pointer-events: none;
+  animation: cheer 2.6s var(--ease-out) both;
+}
+
+.cheer strong {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.cheer span {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+@keyframes cheer {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.8);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.04);
+  }
+  20% {
+    transform: translate(-50%, 0) scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -16px) scale(0.96);
+  }
+}
+
+/* Узкий экран: меню — горизонтальная лента в одну строку, листается вбок. */
+
+@media (max-width: 900px) {
+  .sidebar {
+    background: var(--card-bg);
+    box-shadow: 0 1px 0 var(--border);
+  }
+
+  .nav {
+    flex-direction: row;
+    margin: 0 -12px;
+    padding: 4px 12px 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    width: calc(100% + 24px);
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-item {
+    flex: none;
+  }
+
+  .brand {
+    padding-bottom: 6px;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+  }
+
+  h1 {
+    font-size: 26px;
+  }
+
+  .page-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+  }
+
+  .timeline::before {
+    left: 71px;
+  }
+
+  .tl-item {
+    grid-template-columns: 50px 42px minmax(0, 1fr);
+  }
+
+  .tl-time {
+    font-size: 14px;
+  }
+}
+
+/* Кто попросил систему убрать анимацию — получает спокойный интерфейс без движения. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  .backdrop .glow {
+    animation: none !important;
+  }
+
+  /* Похвала просто показывается и исчезает, без появления и растворения. */
+  .cheer {
+    animation: none !important;
+    transform: translateX(-50%);
+  }
 }

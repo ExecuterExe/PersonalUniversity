@@ -21,7 +21,7 @@ import { SetupWizard, storedStep } from './screens/Setup';
 import { StatsScreen } from './screens/Stats';
 import { TodayScreen } from './screens/Today';
 import type { GoogleStatus, Today } from './types';
-import { Alert, Loading } from './ui';
+import { Alert, Loading, Progress } from './ui';
 
 const ROUTES = [
   { id: 'today', title: 'Сегодня', icon: Sun },
@@ -51,6 +51,36 @@ function Brand() {
   );
 }
 
+/** Фон за всем интерфейсом: плывущее сияние, а в режиме погружения — ещё и звёзды. */
+function Backdrop() {
+  return (
+    <div className="backdrop" aria-hidden="true">
+      <span className="glow g1" />
+      <span className="glow g2" />
+      <span className="glow g3" />
+      <span className="stars" />
+    </div>
+  );
+}
+
+function SemesterBadge({ semester }: { semester: NonNullable<Today['semester']> }) {
+  const week = semester.currentWeek;
+  const started = week !== null && week > 0;
+  return (
+    <div className="sidebar-footer">
+      <div className="row between">
+        <span>{started ? `Неделя ${week} из ${semester.fullWeeks}` : 'Семестр начинается'}</span>
+        {started && <strong>{Math.round((week / semester.fullWeeks) * 100)}%</strong>}
+      </div>
+      <Progress
+        value={started ? week / semester.fullWeeks : 0}
+        label="Сколько недель семестра прошло"
+      />
+      <span className="faint">до {semester.endDate.split('-').reverse().join('.')}</span>
+    </div>
+  );
+}
+
 function Shell() {
   const { refresh } = useRefresh();
   const { data: today, error } = useApi<Today>('/api/today');
@@ -72,6 +102,12 @@ function Shell() {
     const id = setInterval(refresh, 3000);
     return () => clearInterval(id);
   }, [error, refresh]);
+
+  // Идёт занятие и открыт его экран — гасим свет: тёмный режим погружения.
+  const immersive = Boolean(today?.timer) && route === 'today';
+  useEffect(() => {
+    document.documentElement.classList.toggle('immersive', immersive);
+  }, [immersive]);
 
   if (!today) {
     return (
@@ -107,36 +143,27 @@ function Shell() {
 
   const semesterIds =
     today.semester?.disciplines.filter((d) => d.frequency !== null).map((d) => d.id) ?? [];
-  const week = today.semester?.currentWeek;
 
   return (
     <div className="layout">
       <aside className="sidebar">
         <Brand />
-        {ROUTES.map(({ id, title, icon: Icon }) => (
-          <a key={id} href={`#${id}`} className={`nav-item ${route === id ? 'active' : ''}`}>
-            <Icon size={19} />
-            {title}
-            {id === 'decisions' && today.openDecisions > 0 && (
-              <span className="count">{today.openDecisions}</span>
-            )}
-          </a>
-        ))}
-        <div className="sidebar-footer">
-          {today.semester ? (
-            <>
-              {week !== null && week !== undefined && week > 0
-                ? `Неделя ${week} из ${today.semester.fullWeeks}`
-                : 'Семестр начинается'}
-              <br />
-              <span className="faint">
-                до {today.semester.endDate.split('-').reverse().join('.')}
-              </span>
-            </>
-          ) : (
-            'Семестр ещё не составлен'
-          )}
-        </div>
+        <nav className="nav">
+          {ROUTES.map(({ id, title, icon: Icon }) => (
+            <a key={id} href={`#${id}`} className={`nav-item ${route === id ? 'active' : ''}`}>
+              <Icon size={19} />
+              {title}
+              {id === 'decisions' && today.openDecisions > 0 && (
+                <span className="count">{today.openDecisions}</span>
+              )}
+            </a>
+          ))}
+        </nav>
+        {today.semester ? (
+          <SemesterBadge semester={today.semester} />
+        ) : (
+          <div className="sidebar-footer">Семестр ещё не составлен</div>
+        )}
       </aside>
       <main className="main">
         <div
@@ -182,7 +209,10 @@ export function App() {
   return (
     <RefreshContext.Provider value={{ version, refresh }}>
       <ColorsProvider>
-        <Shell />
+        <Backdrop />
+        <div className="app">
+          <Shell />
+        </div>
       </ColorsProvider>
     </RefreshContext.Provider>
   );

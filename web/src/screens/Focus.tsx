@@ -14,7 +14,7 @@ import {
   Droplets,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { api } from '../api';
 import { useColor } from '../colors';
 import { countdown, local } from '../format';
@@ -58,10 +58,13 @@ function chime() {
 /** Какую смену фазы уже отметили сигналом — общая на все перерисовки таймера. */
 let signalledPhase = '';
 
-const RING = 280;
+// Кольцо рисуется в координатах 340×340 и растягивается под ширину экрана.
+const RING = 340;
 const STROKE = 14;
-const RADIUS = (RING - STROKE) / 2;
+const RADIUS = 134;
+const TICKS_RADIUS = 160;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+const TICK_STEP = (2 * Math.PI * TICKS_RADIUS) / 60;
 
 /** Кольцо фазы: считает само между запросами; новые данные с сервера — новый экземпляр. */
 function PhaseRing({ view, totalCycles }: { view: TimerView; totalCycles: number }) {
@@ -90,20 +93,34 @@ function PhaseRing({ view, totalCycles }: { view: TimerView; totalCycles: number
     };
   }, [phaseLeft, v.phase]);
 
+  // Светящаяся «голова» дуги — там, где сейчас время.
+  const angle = share * 2 * Math.PI;
+  const head = { x: RING / 2 + RADIUS * Math.cos(angle), y: RING / 2 + RADIUS * Math.sin(angle) };
+
   return (
     <>
-      <div className="ring">
-        <svg width={RING} height={RING}>
+      <div className={`ring ${focusPhase ? '' : 'break'} ${v.paused ? 'paused' : ''}`}>
+        <svg viewBox={`0 0 ${RING} ${RING}`}>
           <defs>
             <linearGradient id="focus-gradient" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#4f6cf2" />
-              <stop offset="100%" stopColor="#7b5ce8" />
+              <stop offset="0%" stopColor="#5b7bff" />
+              <stop offset="55%" stopColor="#8b6cff" />
+              <stop offset="100%" stopColor="#d07bff" />
             </linearGradient>
             <linearGradient id="break-gradient" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#22b07d" />
-              <stop offset="100%" stopColor="#14a3a0" />
+              <stop offset="0%" stopColor="#2fd39a" />
+              <stop offset="100%" stopColor="#22b8d6" />
             </linearGradient>
           </defs>
+          <circle
+            className="ring-ticks"
+            cx={RING / 2}
+            cy={RING / 2}
+            r={TICKS_RADIUS}
+            fill="none"
+            strokeWidth={6}
+            strokeDasharray={`1.5 ${TICK_STEP - 1.5}`}
+          />
           <circle
             className="ring-track"
             cx={RING / 2}
@@ -124,6 +141,7 @@ function PhaseRing({ view, totalCycles }: { view: TimerView; totalCycles: number
             strokeDasharray={CIRCUMFERENCE}
             strokeDashoffset={CIRCUMFERENCE * (1 - share)}
           />
+          {share > 0.005 && <circle className="ring-head" cx={head.x} cy={head.y} r={5} />}
         </svg>
         <div className="ring-center">
           <span className="countdown">{countdown(phaseLeft)}</span>
@@ -373,9 +391,15 @@ export function FocusView({ timer }: { timer: TimerView }) {
   return (
     <div className="focus">
       <div className="focus-stage">
-        <div className="row" style={{ gap: 8 }}>
-          <span className="dot" style={{ background: color.accent, width: 12, height: 12 }} />
-          <h2 style={{ fontSize: 22 }}>{details?.session.disciplineName ?? 'Занятие'}</h2>
+        <div className="focus-title">
+          <span className="eyebrow">Режим погружения</span>
+          <h2>
+            <span
+              className="dot"
+              style={{ background: color.accent, '--accent': color.accent } as CSSProperties}
+            />
+            {details?.session.disciplineName ?? 'Занятие'}
+          </h2>
         </div>
         {timer.autoPause && settings && (
           <AutoPauseNote

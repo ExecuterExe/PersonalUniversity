@@ -66,16 +66,21 @@ export function PageHeader({
   title,
   subtitle,
   actions,
+  icon,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
     <div className="page-header">
-      <div>
-        <h1>{title}</h1>
-        {subtitle && <p className="subtitle">{subtitle}</p>}
+      <div className="title-row">
+        {icon && <span className="page-icon">{icon}</span>}
+        <div>
+          <h1>{title}</h1>
+          {subtitle && <p className="subtitle">{subtitle}</p>}
+        </div>
       </div>
       {actions && <div className="row">{actions}</div>}
     </div>
@@ -256,7 +261,7 @@ export function Stat({
   return (
     <div className="card stat">
       <span className="label">
-        {icon}
+        {icon && <span className="stat-icon">{icon}</span>}
         {label}
       </span>
       <span className="value">{value}</span>

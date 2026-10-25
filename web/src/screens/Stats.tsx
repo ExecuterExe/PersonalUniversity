@@ -276,7 +276,11 @@ export function StatsScreen({ today }: { today: Today }) {
   const { data, error } = useApi<Stats | null>('/api/stats');
   const [view, setView] = useState<'bars' | 'table'>('bars');
   const header = (
-    <PageHeader title="Статистика" subtitle="Время — только чистая учёба, без перерывов Помодоро" />
+    <PageHeader
+      icon={<BarChart3 size={24} />}
+      title="Статистика"
+      subtitle="Время — только чистая учёба, без перерывов Помодоро"
+    />
   );
   if (data === undefined) {
     return (

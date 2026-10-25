@@ -2,34 +2,46 @@ import { plural, SESSION_FORMS } from '@ou/engine';
 import { DateTime } from 'luxon';
 import {
   ArrowRight,
+  BookmarkCheck,
   Brain,
+  CalendarDays,
+  Check,
+  Clock,
+  Coffee,
   Flame,
+  Hourglass,
   Inbox,
   Layers,
+  Moon,
   NotebookPen,
   Play,
   Sparkles,
+  Sun,
+  Sunrise,
+  Sunset,
   Target,
   TrendingUp,
   Zap,
+  type LucideIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { api } from '../api';
 import { useAccent, useColor } from '../colors';
-import { formatDuration, formatPercent, local, ORIGIN, STATUS, time } from '../format';
-import { useAction, useApi } from '../hooks';
+import { countdown, formatDuration, formatPercent, local, ORIGIN, STATUS, time } from '../format';
+import { celebrate } from '../fx';
+import { useAction, useApi, useNow } from '../hooks';
 import type { SessionDetails, SessionView, Stats, Today } from '../types';
 import { Alert, Badge, Button, Card, Empty, ErrorText, Field, PageHeader } from '../ui';
 import { FocusView } from './Focus';
 
 const EARLY_START_MS = 30 * 60_000;
 
-function greeting(now: number, zone: string): string {
+function greeting(now: number, zone: string): { text: string; icon: LucideIcon } {
   const hour = local(now, zone).hour;
-  if (hour >= 5 && hour < 12) return 'Доброе утро';
-  if (hour >= 12 && hour < 18) return 'Добрый день';
-  if (hour >= 18) return 'Добрый вечер';
-  return 'Доброй ночи';
+  if (hour >= 5 && hour < 12) return { text: 'Доброе утро', icon: Sunrise };
+  if (hour >= 12 && hour < 18) return { text: 'Добрый день', icon: Sun };
+  if (hour >= 18) return { text: 'Добрый вечер', icon: Sunset };
+  return { text: 'Доброй ночи', icon: Moon };
 }
 
 /** «через 25 мин», «через 2 ч 10 мин», «завтра в 10:00», «пн 2 ноября в 10:00» */
@@ -109,13 +121,22 @@ export function SummaryCard({ session, zone }: { session: SessionView; zone: str
             icon={<Sparkles size={17} />}
             disabled={busy || (!keyConcepts.trim() && !retelling.trim())}
             onClick={() =>
-              void run(() =>
-                api.post(`/api/sessions/${session.id}/summary`, {
+              void run(async () => {
+                await api.post(`/api/sessions/${session.id}/summary`, {
                   keyConcepts,
                   retelling,
                   continueFrom,
-                }),
-              )
+                });
+                return true;
+              }).then((saved) => {
+                if (!saved) return;
+                celebrate(
+                  'Занятие засчитано!',
+                  session.actualMinutes
+                    ? `+${formatDuration(session.actualMinutes)} чистой учёбы — так держать`
+                    : 'Так держать',
+                );
+              })
             }
           >
             Записать итог
@@ -125,6 +146,73 @@ export function SummaryCard({ session, zone }: { session: SessionView; zone: str
         <ErrorText error={error} />
       </div>
     </Card>
+  );
+}
+
+/** Рисунок героя: пятна света и орбиты со «спутниками». */
+function HeroArt() {
+  return (
+    <div className="hero-art" aria-hidden="true">
+      <span className="orb o1" />
+      <span className="orb o2" />
+      <span className="orb o3" />
+      <svg className="orbits" viewBox="0 0 420 420">
+        <circle className="path" cx="210" cy="210" r="200" />
+        <circle className="path" cx="210" cy="210" r="150" />
+        <circle className="path" cx="210" cy="210" r="100" />
+        <g className="spin">
+          <circle cx="210" cy="10" r="5" fill="#fff" />
+          <circle cx="410" cy="210" r="3" fill="#fff" opacity="0.6" />
+        </g>
+        <g className="spin slow">
+          <circle cx="210" cy="60" r="4" fill="#c4f1ff" />
+          <circle cx="60" cy="210" r="3" fill="#fff" opacity="0.7" />
+          <circle cx="310" cy="210" r="2.5" fill="#ffd6f0" />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+/**
+ * Живой отсчёт до начала (или до конца, если занятие уже идёт). Время сервиса берётся с сервера
+ * и дальше идёт по часам браузера — новый ответ сервера даёт новый экземпляр.
+ */
+function HeroClock({
+  session,
+  serverNow,
+  zone,
+}: {
+  session: SessionView;
+  serverNow: number;
+  zone: string;
+}) {
+  const [base] = useState(() => ({ server: serverNow, client: Date.now() }));
+  const now = base.server + (useNow(1000) - base.client);
+  const start = local(session.start, zone).setLocale('ru');
+  let label: string;
+  let big: string;
+  let sub: string;
+  if (now >= session.start && now < session.end) {
+    label = 'идёт сейчас';
+    big = countdown(session.end - now);
+    sub = 'до конца';
+  } else if (start.hasSame(local(now, zone), 'day')) {
+    label = 'до начала';
+    big = countdown(session.start - now);
+    sub = `начало в ${start.toFormat('HH:mm')}`;
+  } else {
+    const tomorrow = start.hasSame(local(now, zone).plus({ days: 1 }), 'day');
+    label = tomorrow ? 'завтра' : start.toFormat('cccc');
+    big = start.toFormat('HH:mm');
+    sub = tomorrow ? 'начало' : start.toFormat('d MMMM');
+  }
+  return (
+    <div className="hero-clock">
+      <span className="label">{label}</span>
+      <span className="big">{big}</span>
+      <span className="sub">{sub}</span>
+    </div>
   );
 }
 
@@ -138,53 +226,71 @@ function NextHero({ session, today }: { session: SessionView; today: Today }) {
   const hint = today.continueHints[session.disciplineId];
   return (
     <div className="hero">
-      <div className="eyebrow">
-        {startable
-          ? 'Пора заниматься'
-          : `Следующее занятие · ${when(session.start, today.now, zone)}`}
-      </div>
-      <h2>{session.disciplineName}</h2>
-      <div className="meta">
-        {local(session.start, zone).setLocale('ru').toFormat('cccc, d MMMM')} ·{' '}
-        {time(session.start, zone)}–{time(session.end, zone)} ·{' '}
-        {formatDuration(Math.round((session.end - session.start) / 60_000))}
-      </div>
-      {details?.goal && (
-        <div className="meta small" style={{ marginTop: 6 }}>
-          Цель: {details.goal}
-        </div>
-      )}
-      {hint && (
-        <div className="hint">
-          <strong>С чего продолжить:</strong> {hint}
-        </div>
-      )}
-      <div className="row" style={{ marginTop: 18 }}>
-        {startable ? (
-          <Button
-            size="lg"
-            icon={<Play size={18} />}
-            disabled={busy}
-            onClick={() => void run(() => api.post(`/api/sessions/${session.id}/start`))}
-          >
-            Начать занятие
-          </Button>
-        ) : (
-          <span className="small" style={{ opacity: 0.85 }}>
-            Начать можно за 30 минут до начала
+      <HeroArt />
+      <div className="hero-inner">
+        <div className="hero-body">
+          <span className="eyebrow-pill">
+            <span className={`live-dot ${startable ? '' : 'calm'}`} />
+            {startable ? 'Пора заниматься' : `Следующее · ${when(session.start, today.now, zone)}`}
           </span>
-        )}
+          <h2>{session.disciplineName}</h2>
+          <div className="hero-chips">
+            <span className="hero-chip">
+              <CalendarDays size={14} />
+              {local(session.start, zone).setLocale('ru').toFormat('cccc, d MMMM')}
+            </span>
+            <span className="hero-chip">
+              <Clock size={14} />
+              {time(session.start, zone)}–{time(session.end, zone)}
+            </span>
+            <span className="hero-chip">
+              <Hourglass size={14} />
+              {formatDuration(Math.round((session.end - session.start) / 60_000))}
+            </span>
+          </div>
+          {details?.goal && (
+            <p className="goal">
+              <Target size={16} />
+              <span>{details.goal}</span>
+            </p>
+          )}
+          {hint && (
+            <div className="hint">
+              <BookmarkCheck size={16} />
+              <span>
+                <strong>С чего продолжить:</strong> {hint}
+              </span>
+            </div>
+          )}
+          <div className="hero-actions">
+            {startable ? (
+              <Button
+                size="lg"
+                className="beckon"
+                icon={<Play size={18} />}
+                disabled={busy}
+                onClick={() => void run(() => api.post(`/api/sessions/${session.id}/start`))}
+              >
+                Начать занятие
+              </Button>
+            ) : (
+              <span className="hero-note">Начать можно за 30 минут до начала</span>
+            )}
+          </div>
+          {error && (
+            <p className="small" style={{ marginTop: 10 }}>
+              {error}
+            </p>
+          )}
+        </div>
+        <HeroClock key={today.now} session={session} serverNow={today.now} zone={zone} />
       </div>
-      {error && (
-        <p className="small" style={{ marginTop: 10 }}>
-          {error}
-        </p>
-      )}
     </div>
   );
 }
 
-function LessonRow({ s, today }: { s: SessionView; today: Today }) {
+/** Занятие на линии дня: время, точка на линии, карточка. */
+function TimelineItem({ s, today, next }: { s: SessionView; today: Today; next: boolean }) {
   const style = useAccent(s.disciplineId);
   const zone = today.timezone;
   const { run, error, busy } = useAction();
@@ -195,30 +301,31 @@ function LessonRow({ s, today }: { s: SessionView; today: Today }) {
     !today.timer &&
     !today.pendingSummary;
   return (
-    <div
-      className={`lesson ${s.status === 'held' ? 'done' : ''} ${s.status === 'missed' || s.status === 'skipped' ? 'off' : ''}`}
-      style={style}
-    >
-      <span className="time">
-        {time(s.start, zone)}–{time(s.end, zone)}
+    <li className={`tl-item ${s.status} ${next ? 'next' : ''}`} style={style}>
+      <span className="tl-time">
+        {time(s.start, zone)}
+        <small>{time(s.end, zone)}</small>
       </span>
-      <div className="grow">
-        <strong>{s.disciplineName}</strong>
-        {ORIGIN[s.origin] && <div className="faint">{ORIGIN[s.origin]}</div>}
-        <ErrorText error={error} />
+      <span className="tl-node">{s.status === 'held' && <Check size={11} strokeWidth={4} />}</span>
+      <div className="tl-card">
+        <div className="grow">
+          <strong>{s.disciplineName}</strong>
+          {ORIGIN[s.origin] && <div className="faint">{ORIGIN[s.origin]}</div>}
+          <ErrorText error={error} />
+        </div>
+        <Badge tone={STATUS_TONE[s.status]}>{STATUS[s.status]}</Badge>
+        {startable && (
+          <Button
+            size="sm"
+            icon={<Play size={14} />}
+            disabled={busy}
+            onClick={() => void run(() => api.post(`/api/sessions/${s.id}/start`))}
+          >
+            Начать
+          </Button>
+        )}
       </div>
-      <Badge tone={STATUS_TONE[s.status]}>{STATUS[s.status]}</Badge>
-      {startable && (
-        <Button
-          size="sm"
-          icon={<Play size={14} />}
-          disabled={busy}
-          onClick={() => void run(() => api.post(`/api/sessions/${s.id}/start`))}
-        >
-          Начать
-        </Button>
-      )}
-    </div>
+    </li>
   );
 }
 
@@ -253,41 +360,101 @@ function Unplanned({ today }: { today: Today }) {
   );
 }
 
+const METER = 112;
+const METER_STROKE = 11;
+const METER_RADIUS = (METER - METER_STROKE) / 2;
+const METER_LENGTH = 2 * Math.PI * METER_RADIUS;
+
+/** Кольцо: какая доля плана семестра (в часах чистой учёбы) уже пройдена. */
+function MeterRing({ value }: { value: number }) {
+  const share = Math.max(0, Math.min(1, value));
+  return (
+    <div
+      className="meter-ring"
+      role="img"
+      aria-label={`Пройдено ${formatPercent(share)} плана семестра`}
+    >
+      <svg width={METER} height={METER}>
+        <defs>
+          <linearGradient id="meter-gradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#4f6cf2" />
+            <stop offset="100%" stopColor="#9b5cf0" />
+          </linearGradient>
+        </defs>
+        <circle
+          className="track"
+          cx={METER / 2}
+          cy={METER / 2}
+          r={METER_RADIUS}
+          fill="none"
+          strokeWidth={METER_STROKE}
+        />
+        <circle
+          className="fill"
+          cx={METER / 2}
+          cy={METER / 2}
+          r={METER_RADIUS}
+          fill="none"
+          stroke="url(#meter-gradient)"
+          strokeWidth={METER_STROKE}
+          strokeDasharray={METER_LENGTH}
+          strokeDashoffset={METER_LENGTH * (1 - share)}
+          style={{ '--full': METER_LENGTH } as CSSProperties}
+        />
+      </svg>
+      <div className="center">
+        <strong>{formatPercent(share)}</strong>
+        <span>плана</span>
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
+  return (
+    <div className="mini-stat">
+      <span className="ico">{icon}</span>
+      <span className="grow">{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function Pulse() {
   const { data } = useApi<Stats | null>('/api/stats');
   if (!data) return null;
   const held = data.disciplines.reduce((sum, d) => sum + d.held, 0);
   const actual = data.disciplines.reduce((sum, d) => sum + d.actualMinutes, 0);
+  const planned = data.disciplines.reduce((sum, d) => sum + d.plannedMinutes, 0);
   return (
     <Card title="Как идёт семестр" icon={<TrendingUp size={18} color="var(--primary)" />}>
-      <div className="stack" style={{ gap: 10 }}>
-        <div className="row between">
-          <span className="row muted" style={{ gap: 8 }}>
-            <Flame size={16} color="var(--warning)" /> Серия без пропусков
-          </span>
-          <strong>{data.streak}</strong>
+      <div className="pulse">
+        <MeterRing value={planned > 0 ? actual / planned : 0} />
+        <div className="mini-stats">
+          <MiniStat
+            icon={<Flame size={15} color="var(--warning)" />}
+            label="Серия"
+            value={data.streak}
+          />
+          <MiniStat
+            icon={<Brain size={15} color="var(--violet)" />}
+            label="Чистая учёба"
+            value={formatDuration(actual)}
+          />
+          <MiniStat
+            icon={<NotebookPen size={15} color="var(--success)" />}
+            label="Проведено"
+            value={held}
+          />
         </div>
-        <div className="row between">
-          <span className="row muted" style={{ gap: 8 }}>
-            <Brain size={16} color="var(--violet)" /> Чистая учёба
-          </span>
-          <strong>{formatDuration(actual)}</strong>
-        </div>
-        <div className="row between">
-          <span className="row muted" style={{ gap: 8 }}>
-            <NotebookPen size={16} color="var(--success)" /> Проведено занятий
-          </span>
-          <strong>{held}</strong>
-        </div>
-        {data.forecast.overall !== null && (
-          <div className="row between">
-            <span className="row muted" style={{ gap: 8 }}>
-              <Target size={16} color="var(--violet)" /> Прогноз к концу семестра
-            </span>
-            <strong>{formatPercent(data.forecast.overall)} плана</strong>
-          </div>
-        )}
       </div>
+      {data.forecast.overall !== null && (
+        <div className="forecast-line">
+          <Target size={16} color="var(--violet)" />
+          Прогноз к концу семестра
+          <strong>{formatPercent(data.forecast.overall)} плана</strong>
+        </div>
+      )}
     </Card>
   );
 }
@@ -297,10 +464,24 @@ export function TodayScreen({ today }: { today: Today }) {
   if (today.timer) return <FocusView timer={today.timer} />;
 
   const date = DateTime.fromMillis(today.now, { zone }).setLocale('ru').toFormat('cccc, d MMMM');
+  const hello = greeting(today.now, zone);
+  const week = today.semester?.currentWeek;
   const header = (
     <PageHeader
-      title={greeting(today.now, zone)}
+      icon={<hello.icon size={24} className="sway" />}
+      title={hello.text}
       subtitle={date[0]!.toUpperCase() + date.slice(1)}
+      actions={
+        today.semester &&
+        week !== null &&
+        week !== undefined &&
+        week > 0 && (
+          <span className="pill">
+            <Layers size={14} color="var(--violet)" />
+            Неделя {week} из {today.semester.fullWeeks}
+          </span>
+        )
+      }
     />
   );
 
@@ -360,15 +541,18 @@ export function TodayScreen({ today }: { today: Today }) {
             }
           >
             {today.sessions.length === 0 ? (
-              <p className="muted">
+              <div className="row muted" style={{ gap: 12, flexWrap: 'nowrap' }}>
+                <span className="swatch-sm">
+                  <Coffee size={17} />
+                </span>
                 Сегодня занятий нет — можно отдохнуть или позаниматься вне расписания.
-              </p>
-            ) : (
-              <div className="stack" style={{ gap: 8 }}>
-                {today.sessions.map((s) => (
-                  <LessonRow key={s.id} s={s} today={today} />
-                ))}
               </div>
+            ) : (
+              <ol className="timeline">
+                {today.sessions.map((s) => (
+                  <TimelineItem key={s.id} s={s} today={today} next={s.id === upcoming?.id} />
+                ))}
+              </ol>
             )}
           </Card>
         </div>

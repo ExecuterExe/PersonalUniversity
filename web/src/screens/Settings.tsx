@@ -10,6 +10,7 @@ import {
   Power,
   RefreshCw,
   Save,
+  Settings as SettingsIcon,
   Timer,
   Trash2,
   Unplug,
@@ -474,7 +475,11 @@ function LaunchPanel() {
 export function SettingsScreen() {
   return (
     <>
-      <PageHeader title="Настройки" subtitle="Время, ограничения, Помодоро и календарь" />
+      <PageHeader
+        icon={<SettingsIcon size={24} />}
+        title="Настройки"
+        subtitle="Время, ограничения, Помодоро и календарь"
+      />
       <div className="stack-lg">
         <Card>
           <SettingsForm />

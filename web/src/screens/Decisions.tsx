@@ -389,7 +389,11 @@ export function DecisionsScreen({ today }: { today: Today }) {
   const [preview, setPreview] = useState<MakeupPreview | null>(null);
   const { run, error: actionError, busy } = useAction();
   const header = (
-    <PageHeader title="Решения" subtitle="Вопросы, которые сервис не решает без тебя" />
+    <PageHeader
+      icon={<Inbox size={24} />}
+      title="Решения"
+      subtitle="Вопросы, которые сервис не решает без тебя"
+    />
   );
   if (!data) {
     return (
