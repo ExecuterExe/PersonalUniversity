@@ -68,12 +68,23 @@ export function loadState(store: Store, sem: SemesterRecord): PlanState {
   };
 }
 
+export interface BusyOptions {
+  /** Только уже известная занятость, без запроса к Google (фоновые проверки). */
+  cachedBusy?: boolean;
+}
+
 /** Занятость на весь семестр: календарь плюс неудобное время из настроек. */
-export async function busyFor(deps: Deps, sem: SemesterRecord): Promise<BusyEvent[]> {
+export async function busyFor(
+  deps: Deps,
+  sem: SemesterRecord,
+  options: BusyOptions = {},
+): Promise<BusyEvent[]> {
   const settings = engineSettingsFor(deps.store, sem);
   const cal = makeCalendar(specOf(sem), settings.timezone);
   const range = { start: cal.days[0]!.start, end: cal.days[cal.days.length - 1]!.end };
-  const external = await deps.calendar.busy(range);
+  const external = options.cachedBusy
+    ? await deps.calendar.cached(range)
+    : await deps.calendar.busy(range);
   return [...external, ...inconvenientBusy(cal, appSettings(deps.store).inconvenient)];
 }
 
@@ -84,9 +95,13 @@ export interface PlanContext {
   ctx: RuleContext;
 }
 
-export async function planContext(deps: Deps, sem: SemesterRecord): Promise<PlanContext> {
+export async function planContext(
+  deps: Deps,
+  sem: SemesterRecord,
+  options: BusyOptions = {},
+): Promise<PlanContext> {
   const state = loadState(deps.store, sem);
-  const busy = await busyFor(deps, sem);
+  const busy = await busyFor(deps, sem, options);
   return {
     sem,
     state,

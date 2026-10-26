@@ -435,6 +435,30 @@ describe('резервные копии', () => {
 });
 
 describe('особые случаи занятия', () => {
+  it('начал позже — занятие заканчивается по расписанию, а не сдвигается', async () => {
+    const t = testApp(SATURDAY_EVENING);
+    await userSemester(t);
+    const monday = await sessionAt(t, '2026-10-26T10:00'); // 10:00–11:30
+    t.setNow(msk('2026-10-26T10:10'));
+    const late = (await t.call('POST', `/api/sessions/${monday.id}/start`)).body;
+    expect(late).toMatchObject({ plannedMs: 80 * 60_000, remainingMs: 80 * 60_000 });
+
+    t.setNow(msk('2026-10-26T11:30'));
+    expect((await t.call('GET', '/api/timer')).body).toMatchObject({
+      remainingMs: 0,
+      overtime: false,
+    });
+  });
+
+  it('начал раньше — полная длительность, закончится раньше расписания', async () => {
+    const t = testApp(SATURDAY_EVENING);
+    await userSemester(t);
+    const monday = await sessionAt(t, '2026-10-26T10:00');
+    t.setNow(msk('2026-10-26T09:45'));
+    const early = (await t.call('POST', `/api/sessions/${monday.id}/start`)).body;
+    expect(early.plannedMs).toBe(90 * 60_000);
+  });
+
   it('сон компьютера: пауза с момента сна, можно продолжить или засчитать', async () => {
     const t = testApp(SATURDAY_EVENING);
     await userSemester(t);

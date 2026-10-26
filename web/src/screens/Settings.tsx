@@ -384,6 +384,11 @@ export function GooglePanel() {
           <strong>{status.calendarCreated ? 'создан' : 'после подтверждения семестра'}</strong>
         </div>
       </div>
+      <p className="faint">
+        Сервис сверяется с Google при запуске, после изменений в расписании и по кнопке
+        «Синхронизировать». Добавил встречу или передвинул занятие прямо в Google — нажми её, чтобы
+        сервис это увидел.
+      </p>
       {calendars && (
         <div className="stack" style={{ gap: 8 }}>
           <h3>Из каких календарей брать занятость</h3>

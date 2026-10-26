@@ -117,7 +117,10 @@ export function startSession(deps: Deps, id: string): TimerView {
   if (now >= s.end) {
     throw conflict('Время этого занятия прошло — можно позаниматься внепланово');
   }
-  const state = startTimer(s.id, durationMinutes(s), now);
+  // Начал позже — занятие всё равно заканчивается по расписанию: дальше буфер и другие дела.
+  // Начал раньше — полная длительность, закончится раньше расписания.
+  const minutes = Math.min(durationMinutes(s), (s.end - now) / MINUTE);
+  const state = startTimer(s.id, minutes, now);
   store.transaction(() => {
     store.setTimer({ semesterId: sem.id, state });
     store.saveSession(sem.id, { ...s, startedAt: now });

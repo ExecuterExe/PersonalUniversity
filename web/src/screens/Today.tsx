@@ -276,6 +276,12 @@ function NextHero({ session, today }: { session: SessionView; today: Today }) {
             ) : (
               <span className="hero-note">Начать можно за 30 минут до начала</span>
             )}
+            {startable && today.now > session.start && (
+              <span className="hero-note">
+                Закончится по расписанию в {time(session.end, zone)} — осталось{' '}
+                {formatDuration(Math.max(1, Math.round((session.end - today.now) / 60_000)))}
+              </span>
+            )}
           </div>
           {error && (
             <p className="small" style={{ marginTop: 10 }}>

@@ -3,6 +3,7 @@ import { createDiscipline, msk, sessionAt, testApp, USER_SETTINGS, type TestApp 
 import { GOOGLE_SCOPES, type GoogleEvent } from './api';
 import { FakeGoogle } from './fake';
 import { toBusy } from './source';
+import { syncIfPlanChanged } from './sync';
 
 const SATURDAY_EVENING = msk('2026-10-24T21:10');
 
@@ -272,6 +273,108 @@ describe('календарь «Мой университет»', () => {
 
     expect((await t.call('POST', '/api/google/sync')).body.report.created).toBe(72);
     expect(google.ownEvents()).toHaveLength(72);
+  });
+});
+
+describe('без копий событий', () => {
+  const copiesBySession = (google: FakeGoogle) => {
+    const counts = new Map<string, number>();
+    for (const e of google.ownEvents()) {
+      const id = e.extendedProperties!.private!.ouSession!;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return [...counts.values()].filter((n) => n > 1).length;
+  };
+
+  it('занятие вне расписания до начала семестра не размножается при каждой синхронизации', async () => {
+    const { google, t } = setup();
+    await connect(t);
+    // Как у пользователя: семестр с понедельника 26.10, а занятие вне расписания — раньше, 24.10.
+    await t.call('PUT', '/api/settings', USER_SETTINGS);
+    const tf = await createDiscipline(t, 'Трендфоркастинг');
+    const sql = await createDiscipline(t, 'SQL');
+    await t.call('POST', '/api/semesters/draft', {
+      startDate: '2026-10-26',
+      disciplineIds: [tf.id, sql.id],
+    });
+    await t.call('POST', '/api/semesters/draft/confirm');
+    const started = await t.call('POST', '/api/sessions/unplanned', { disciplineId: sql.id });
+    expect(started.status).toBe(200);
+    t.advance(20);
+    await t.call('POST', '/api/timer/finish');
+    for (let i = 0; i < 3; i++) await t.call('POST', '/api/google/sync');
+
+    const unplanned = google
+      .ownEvents()
+      .filter((e) => e.extendedProperties?.private?.ouSession?.startsWith('unplanned.'));
+    expect(unplanned).toHaveLength(1);
+    expect(copiesBySession(google)).toBe(0);
+  });
+
+  it('две синхронизации одновременно не создают копий', async () => {
+    const { google, t } = setup();
+    await connect(t);
+    await activeSemester(t);
+    google.latencyMs = 2;
+    await Promise.all([
+      t.call('POST', '/api/google/sync'),
+      t.call('POST', '/api/google/sync'),
+      t.call('POST', '/api/google/sync'),
+    ]);
+    const own = [...google.calendars.values()].filter((c) => c.summary === 'Мой университет');
+    expect(own).toHaveLength(1);
+    expect(google.ownEvents()).toHaveLength(72);
+    expect(copiesBySession(google)).toBe(0);
+  });
+
+  it('копии, оставшиеся от прошлых сбоев, убираются при синхронизации', async () => {
+    const { google, t } = setup();
+    await connect(t);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    const own = google.ownCalendar()!;
+    const [first, second] = google.ownEvents();
+    // Копии с теми же пометками занятия, но другими номерами событий — как после сбоя.
+    for (const e of [first!, first!, second!]) google.addEvent(own.id, e);
+    expect(google.ownEvents()).toHaveLength(75);
+
+    const report = (await t.call('POST', '/api/google/sync')).body.report;
+    expect(report).toMatchObject({ created: 0, deletedInGoogle: 0 });
+    expect(google.ownEvents()).toHaveLength(72);
+    expect(copiesBySession(google)).toBe(0);
+    expect(google.eventOf(first!.extendedProperties!.private!.ouSession!)?.id).toBe(first!.id);
+  });
+});
+
+describe('когда сервис обращается к Google', () => {
+  it('после правок — только если поменялось расписание', async () => {
+    const { google, t } = setup();
+    await connect(t);
+    await activeSemester(t);
+    expect((await syncIfPlanChanged(t.deps))?.created).toBe(72);
+
+    // Правка, которая не меняет занятия, — в Google не ходим.
+    google.requests = 0;
+    await t.call('PUT', '/api/settings', USER_SETTINGS);
+    expect(await syncIfPlanChanged(t.deps)).toBeNull();
+    expect(google.requests).toBe(0);
+
+    const friday = await sessionAt(t, '2026-10-30T10:00');
+    await t.call('POST', `/api/sessions/${friday.id}/move`, { start: msk('2026-10-30T11:00') });
+    expect((await syncIfPlanChanged(t.deps))?.updated).toBe(1);
+    expect(Date.parse(google.eventOf(friday.id)!.start!.dateTime!)).toBe(msk('2026-10-30T11:00'));
+  });
+
+  it('фоновые проверки и главный экран не обращаются к Google', async () => {
+    const { google, t } = setup();
+    await connect(t);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    google.requests = 0;
+    t.advance(60); // известная занятость давно «устарела»
+    await t.call('GET', '/api/today');
+    await t.call('GET', '/api/today');
+    expect(google.requests).toBe(0);
   });
 });
 

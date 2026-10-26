@@ -11,6 +11,8 @@ export interface SyncReport {
   deleted: number;
   /** Занятия, которые пользователь сам передвинул в Google. */
   movedInGoogle: number;
+  /** Лишние копии событий (от прошлых сбоев), которые убраны. */
+  copiesRemoved: number;
   /** Занятия, которые пользователь сам удалил в Google. */
   deletedInGoogle: number;
 }
@@ -18,6 +20,56 @@ export interface SyncReport {
 function semesterRange(sem: SemesterRecord, timezone: string) {
   const cal = makeCalendar(specOf(sem), timezone);
   return { start: cal.days[0]!.start, end: cal.days[cal.days.length - 1]!.end };
+}
+
+/**
+ * Где искать свои события: весь семестр и всё, что связано с его занятиями. Занятие вне расписания
+ * может быть и до первой недели семестра — если его не найти, оно создавалось бы заново при
+ * каждой синхронизации.
+ */
+function listingRange(deps: Deps, sem: SemesterRecord, timezone: string) {
+  const range = semesterRange(sem, timezone);
+  const spans = [...deps.store.loadSessions(sem.id), ...deps.store.listLinks(sem.id)];
+  for (const s of spans) {
+    range.start = Math.min(range.start, s.start);
+    range.end = Math.max(range.end, s.end);
+  }
+  return range;
+}
+
+/** Что сервис отправляет в Google. Если это не изменилось, синхронизировать после правки незачем. */
+export function calendarFingerprint(deps: Deps): string {
+  const { store } = deps;
+  const sem = store.findSemester('active');
+  if (!sem) return 'без семестра';
+  const names = sem.disciplineIds.map((id) => `${id}=${store.getDiscipline(id)?.name ?? ''}`);
+  const awaiting = store
+    .listDecisions('open')
+    .filter((d) => d.kind === 'calendar-edit')
+    .map((d) => d.id);
+  const sessions = store
+    .loadSessions(sem.id)
+    .map((s) => `${s.id}@${s.start}-${s.end}:${s.status}`)
+    .sort();
+  return [sem.id, appSettings(store).timezone, ...names, ...awaiting, ...sessions].join('|');
+}
+
+interface SyncState {
+  /** Синхронизации идут строго по очереди: две одновременные создавали копии событий. */
+  queue: Promise<unknown>;
+  /** Отпечаток расписания после последней удачной синхронизации. */
+  pushed: string | null;
+}
+
+const states = new WeakMap<Deps, SyncState>();
+
+function stateOf(deps: Deps): SyncState {
+  let state = states.get(deps);
+  if (!state) {
+    state = { queue: Promise.resolve(), pushed: null };
+    states.set(deps, state);
+  }
+  return state;
 }
 
 const iso = (t: Instant) => new Date(t).toISOString();
@@ -230,10 +282,30 @@ async function pushPlan(
 }
 
 /**
- * Синхронизация с Google (раздел 7 и план, этап 3): правки пользователя → план → календарь,
- * затем свежая занятость. Ошибки не роняют сервис: он работает с последними данными.
+ * Своё событие без связи с занятием — копия от прошлого сбоя (например, двух синхронизаций
+ * сразу): удаляем, иначе в календаре в одно время стоят несколько одинаковых занятий.
  */
-export async function syncGoogle(deps: Deps): Promise<SyncReport | null> {
+async function removeCopies(
+  deps: Deps,
+  sem: SemesterRecord,
+  calendarId: string,
+  events: GoogleEvent[],
+  report: SyncReport,
+): Promise<GoogleEvent[]> {
+  const linked = new Set(deps.store.listLinks(sem.id).map((l) => l.eventId));
+  const kept: GoogleEvent[] = [];
+  for (const event of events) {
+    if (event.status === 'cancelled' || linked.has(event.id)) {
+      kept.push(event);
+      continue;
+    }
+    await deps.google!.api.deleteEvent(calendarId, event.id);
+    report.copiesRemoved++;
+  }
+  return kept;
+}
+
+async function syncOnce(deps: Deps): Promise<SyncReport | null> {
   const { store } = deps;
   const google = deps.google;
   const account = store.getGoogleAccount();
@@ -243,6 +315,7 @@ export async function syncGoogle(deps: Deps): Promise<SyncReport | null> {
     updated: 0,
     deleted: 0,
     movedInGoogle: 0,
+    copiesRemoved: 0,
     deletedInGoogle: 0,
   };
   const sem = store.findSemester('active');
@@ -250,11 +323,14 @@ export async function syncGoogle(deps: Deps): Promise<SyncReport | null> {
 
   try {
     if (sem) {
-      const range = semesterRange(sem, timezone);
       let calendarId = await ensureCalendar(deps, timezone);
       let events: GoogleEvent[];
       try {
-        events = await google.api.listEvents(calendarId, range, `ouSemester=${sem.id}`);
+        events = await google.api.listEvents(
+          calendarId,
+          listingRange(deps, sem, timezone),
+          `ouSemester=${sem.id}`,
+        );
       } catch (error) {
         // Календарь «Мой университет» удалили в Google — создаём заново и переносим всё туда.
         if (!(error instanceof GoogleError) || error.status !== 404) throw error;
@@ -263,10 +339,12 @@ export async function syncGoogle(deps: Deps): Promise<SyncReport | null> {
         calendarId = await ensureCalendar(deps, timezone);
         events = [];
       }
+      events = await removeCopies(deps, sem, calendarId, events, report);
       await pullEdits(deps, sem, calendarId, events, report);
       await pushPlan(deps, sem, calendarId, timezone, report);
     }
     store.updateGoogleAccount({ lastSyncAt: deps.now(), lastSyncError: null });
+    stateOf(deps).pushed = calendarFingerprint(deps);
   } catch (error) {
     if (!(error instanceof GoogleError)) throw error;
     store.updateGoogleAccount({ lastSyncError: error.message });
@@ -275,4 +353,30 @@ export async function syncGoogle(deps: Deps): Promise<SyncReport | null> {
 
   if (sem) await google.source.refresh(semesterRange(sem, timezone));
   return report;
+}
+
+/**
+ * Синхронизация с Google (раздел 7 и план, этап 3): правки пользователя → план → календарь,
+ * затем свежая занятость. Ошибки не роняют сервис: он работает с последними данными.
+ * Запуски встают в очередь: следующий начнётся, только когда закончится предыдущий.
+ */
+export function syncGoogle(deps: Deps): Promise<SyncReport | null> {
+  const state = stateOf(deps);
+  const run = state.queue.then(() => syncOnce(deps));
+  state.queue = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * После правки в сервисе: синхронизировать, только если поменялось то, что видно в Google, —
+ * занятия, их время, названия дисциплин, пояс. Пауза таймера или итог занятия Google не трогают.
+ */
+export function syncIfPlanChanged(deps: Deps): Promise<SyncReport | null> {
+  if (calendarFingerprint(deps) === stateOf(deps).pushed) return Promise.resolve(null);
+  return syncGoogle(deps);
+}
+
+/** Забыть, что уже отправлено: после входа в Google всё нужно сверить заново. */
+export function resetCalendarSync(deps: Deps): void {
+  stateOf(deps).pushed = null;
 }

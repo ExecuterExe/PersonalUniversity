@@ -56,6 +56,13 @@ export class GoogleCalendarSource implements CalendarSource {
     return this.refresh(range);
   }
 
+  /** Последний известный ответ Google — без запроса. */
+  async cached(range: { start: Instant; end: Instant }): Promise<BusyEvent[]> {
+    if (!this.store.getGoogleAccount().tokens) return [];
+    const cache = this.store.getBusyCache();
+    return cache ? within(cache.events, range) : [];
+  }
+
   /** Спросить Google сейчас; при неудаче — последний известный ответ. */
   async refresh(range: { start: Instant; end: Instant }): Promise<BusyEvent[]> {
     try {

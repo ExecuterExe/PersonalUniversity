@@ -15,6 +15,10 @@ export class FakeGoogle {
   readonly refreshToken = 'refresh-1';
   revoked = false;
   online = true;
+  /** Сколько запросов к календарям пришло — чтобы проверять, когда сервис ходит в Google. */
+  requests = 0;
+  /** Задержка ответа, как у настоящей сети: так видны гонки между запросами. */
+  latencyMs = 0;
   calendars = new Map<string, GoogleCalendarEntry & { timeZone?: string }>();
   events = new Map<string, Map<string, GoogleEvent>>();
   private seq = 0;
@@ -61,6 +65,7 @@ export class FakeGoogle {
 
   readonly fetch: typeof fetch = async (input, init) => {
     if (!this.online) throw new TypeError('fetch failed');
+    if (this.latencyMs > 0) await new Promise((resolve) => setTimeout(resolve, this.latencyMs));
     const url = new URL(String(input));
     const method = init?.method ?? 'GET';
     const body = typeof init?.body === 'string' ? init.body : '';
@@ -89,6 +94,7 @@ export class FakeGoogle {
 
     const auth = new Headers(init?.headers).get('authorization');
     if (auth !== `Bearer ${this.accessToken}`) return json(401, { error: { code: 401 } });
+    this.requests++;
     const parts = url.pathname.replace('/calendar/v3/', '').split('/').map(decodeURIComponent);
 
     if (parts[0] === 'users' && parts[2] === 'calendarList') {

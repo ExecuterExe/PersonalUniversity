@@ -5,7 +5,7 @@ import type { Config } from '../config';
 import type { Deps } from '../domain/context';
 import { conflict } from '../errors';
 import { GoogleError } from './api';
-import { syncGoogle } from './sync';
+import { resetCalendarSync, syncGoogle } from './sync';
 
 const STATE_TTL_MS = 10 * 60_000;
 
@@ -94,6 +94,7 @@ export function registerGoogleRoutes(app: FastifyInstance, deps: Deps, config: C
         calendarTimezone: primary?.timeZone ?? null,
       });
       deps.store.clearBusyCache();
+      resetCalendarSync(deps);
       deps.afterChange?.();
       return back('connected');
     } catch (error) {
@@ -156,6 +157,7 @@ export function registerGoogleRoutes(app: FastifyInstance, deps: Deps, config: C
       calendarTimezone: null,
     });
     deps.store.clearBusyCache();
+    resetCalendarSync(deps);
     return googleStatus(deps);
   });
 }

@@ -5,7 +5,7 @@ import { createDeps } from './deps';
 import { runChecks } from './domain/decisions';
 import { backupIfDue } from './domain/maintenance';
 import { pauseForSleep, pauseIfAway } from './domain/sessions';
-import { syncGoogle } from './google/sync';
+import { syncGoogle, syncIfPlanChanged } from './google/sync';
 
 const DATA_DIR = fileURLToPath(new URL('../../data/', import.meta.url));
 const WEB_DIR = fileURLToPath(new URL('../../web/dist/', import.meta.url));
@@ -29,12 +29,15 @@ const now = () => Date.now() + clockShift;
 const deps = createDeps({ dbPath, config, now });
 if (testMode) console.log(`Тестовый запуск: база ${dbPath}`);
 
-/** Изменения идут в Google пачкой: через несколько секунд после последнего. */
+/**
+ * Изменения идут в Google пачкой — через несколько секунд после последнего — и только если
+ * поменялось расписание: пауза таймера или итог занятия календарь не трогают.
+ */
 let syncTimer: NodeJS.Timeout | undefined;
 deps.afterChange = () => {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    syncGoogle(deps).catch((error: unknown) =>
+    syncIfPlanChanged(deps).catch((error: unknown) =>
       console.error('Синхронизация с Google не удалась:', error),
     );
   }, SYNC_DELAY_MS);
@@ -77,11 +80,13 @@ if (testMode) {
   });
 }
 
-/** При запуске и каждые 15 минут, пока сервер открыт: Google, проверки, резервная копия. */
+/**
+ * Каждые 15 минут, пока сервер работает: пропуски, конфликты, резервная копия. В Google фоновые
+ * проверки не ходят — с ним сервис сверяется при запуске, после правок расписания и по кнопке.
+ */
 async function background(): Promise<void> {
   try {
     if (!testMode) backupIfDue(deps, `${DATA_DIR}backups`);
-    await syncGoogle(deps);
     await runChecks(deps);
   } catch (error) {
     console.error('Фоновая проверка не удалась:', error);
@@ -105,5 +110,14 @@ console.log(`Сервер «Мой университет» запущен: http
 // Отметки — только у того экземпляра, который действительно работает.
 heartbeat();
 setInterval(heartbeat, HEARTBEAT_MS);
+// При запуске — одна синхронизация: подхватить правки, сделанные в Google, пока сервис не работал.
+try {
+  const report = await syncGoogle(deps);
+  if (report?.copiesRemoved) {
+    console.log(`Google: убраны лишние копии событий — ${report.copiesRemoved}`);
+  }
+} catch (error) {
+  console.error('Синхронизация с Google не удалась:', error);
+}
 await background();
 setInterval(() => void background(), CHECK_INTERVAL_MS);

@@ -44,6 +44,7 @@ import { sessionView, type SessionView } from './sessions';
 /**
  * Проверки «при открытии и каждые 15 минут» (раздел 7): пропуски, конфликты,
  * контрольные точки, калибровка. Каждая находка — вопрос в очереди «Решения».
+ * В Google проверки не ходят: конфликты ищутся по занятости, известной с последней синхронизации.
  */
 export async function runChecks(deps: Deps): Promise<void> {
   const { store } = deps;
@@ -68,7 +69,7 @@ export async function runChecks(deps: Deps): Promise<void> {
     }
   });
 
-  const plan = await planContext(deps, sem);
+  const plan = await planContext(deps, sem, { cachedBusy: true });
   const conflicts = detectConflicts(plan.ctx, plan.state, now).filter(
     (c) => c.sessionId !== running,
   );
