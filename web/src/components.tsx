@@ -175,7 +175,7 @@ function SkeletonChip({ slot, name }: { slot: SkeletonSlot; name: string }) {
       style={{ ...accent(color), padding: '8px 10px 8px 14px', fontSize: 13 }}
     >
       <div className="grow" title={name}>
-        <strong className="clip">{name}</strong>
+        <strong>{name}</strong>
         <div className="faint">
           {formatClock(slot.startMinute)}–{formatClock(slot.startMinute + slot.durationMinutes)}
           {slot.parity !== undefined && ' · раз в 2 нед.'}
@@ -194,10 +194,7 @@ export function SkeletonGrid({
   names: Map<string, string>;
 }) {
   return (
-    <div
-      className="grid-4"
-      style={{ gridTemplateColumns: 'repeat(7, minmax(110px, 1fr))', overflowX: 'auto' }}
-    >
+    <div className="semester-days">
       {WEEKDAYS.map((d) => (
         <div className="stack" style={{ gap: 6 }} key={d}>
           <span className="faint" style={{ fontWeight: 600 }}>

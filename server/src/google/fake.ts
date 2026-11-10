@@ -112,8 +112,12 @@ export class FakeGoogle {
     if (!events) return json(404, { error: { code: 404 } });
 
     if (method === 'GET') {
-      const min = Date.parse(url.searchParams.get('timeMin')!);
-      const max = Date.parse(url.searchParams.get('timeMax')!);
+      const min = url.searchParams.has('timeMin')
+        ? Date.parse(url.searchParams.get('timeMin')!)
+        : -Infinity;
+      const max = url.searchParams.has('timeMax')
+        ? Date.parse(url.searchParams.get('timeMax')!)
+        : Infinity;
       const [key, value] = (url.searchParams.get('privateExtendedProperty') ?? '').split('=');
       const items = [...events.values()].filter(
         (e) =>

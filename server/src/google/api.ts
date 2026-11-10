@@ -214,12 +214,16 @@ export class GoogleApi {
 
   listEvents(
     calendarId: string,
-    range: { start: number; end: number },
+    range: { start: number; end: number } | null,
     privateProperty?: string,
   ): Promise<GoogleEvent[]> {
     return this.paged(`/calendars/${encodeURIComponent(calendarId)}/events`, {
-      timeMin: new Date(range.start).toISOString(),
-      timeMax: new Date(range.end).toISOString(),
+      ...(range
+        ? {
+            timeMin: new Date(range.start).toISOString(),
+            timeMax: new Date(range.end).toISOString(),
+          }
+        : {}),
       singleEvents: 'true',
       maxResults: '2500',
       ...(privateProperty ? { privateExtendedProperty: privateProperty } : {}),

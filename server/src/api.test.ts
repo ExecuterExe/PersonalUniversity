@@ -16,6 +16,66 @@ import {
 
 const SATURDAY_EVENING = msk('2026-10-24T21:10');
 
+describe('полное удаление семестра', () => {
+  it('очищает данные семестра и позволяет построить новый с прежними дисциплинами', async () => {
+    const t = testApp(SATURDAY_EVENING);
+    const { semester: sem, tf, sql } = await userSemester(t);
+    const store = t.deps.store;
+    const s = store.loadSessions(sem.id)[0]!;
+    const source = await t.call('POST', `/api/disciplines/${tf.id}/sources`, {
+      kind: 'note',
+      title: 'Материалы',
+      note: 'Сохранить',
+    });
+    expect(source.status).toBe(201);
+    store.saveSummary({
+      semesterId: sem.id,
+      sessionId: s.id,
+      disciplineId: tf.id,
+      keyConcepts: 'Тема',
+      retelling: 'Итог',
+      continueFrom: 'Старый прогресс',
+      createdAt: SATURDAY_EVENING,
+    });
+    store.saveDiscipline({ ...store.getDiscipline(tf.id)!, continueHint: 'Старый прогресс' });
+    store.ensureDecision(
+      'question',
+      `missed:${sem.id}:${s.id}`,
+      'missed',
+      { sessionId: s.id },
+      SATURDAY_EVENING,
+    );
+    store.ensureDecision(
+      'other',
+      'checkpoint:other:mid',
+      'checkpoint',
+      { kind: 'mid' },
+      SATURDAY_EVENING,
+    );
+    t.setNow(s.start);
+    expect((await t.call('POST', `/api/sessions/${s.id}/start`)).status).toBe(200);
+    expect(store.getTimer()).not.toBeNull();
+    expect((await t.call('DELETE', `/api/semesters/${sem.id}`)).status).toBe(204);
+    expect(store.getSemester(sem.id)).toBeNull();
+    expect(store.loadSessions(sem.id)).toEqual([]);
+    expect(store.loadSkeleton(sem.id)).toEqual([]);
+    expect(store.listSummaries()).toEqual([]);
+    expect(store.getTimer()).toBeNull();
+    expect(store.getDecision('question')).toBeNull();
+    expect(store.getDecision('other')).not.toBeNull();
+    expect(store.getDiscipline(tf.id)?.continueHint).toBe('');
+    expect(store.listSources(tf.id)).toHaveLength(1);
+    expect((await t.call('GET', '/api/settings')).body).toMatchObject(USER_SETTINGS);
+    const rebuilt = await t.call('POST', '/api/semesters/draft', {
+      startDate: '2026-10-26',
+      disciplineIds: [tf.id, sql.id],
+    });
+    expect(rebuilt.status).toBe(201);
+    expect(rebuilt.body.sessionsCount).toBeGreaterThan(0);
+    expect((await t.call('DELETE', '/api/semesters/unknown')).status).toBe(204);
+  });
+});
+
 describe('настройки', () => {
   it('по умолчанию — разумные значения; неправильные данные отклоняются с объяснением', async () => {
     const t = testApp(SATURDAY_EVENING);
@@ -457,6 +517,42 @@ describe('особые случаи занятия', () => {
     t.setNow(msk('2026-10-26T09:45'));
     const early = (await t.call('POST', `/api/sessions/${monday.id}/start`)).body;
     expect(early.plannedMs).toBe(90 * 60_000);
+  });
+
+  it('при открытой странице ставит на паузу на границе слота и ждёт явного продолжения', async () => {
+    const t = testApp(SATURDAY_EVENING);
+    await userSemester(t);
+    const s = await sessionAt(t, '2026-10-26T10:00');
+    t.setNow(msk('2026-10-26T11:18'));
+    await t.call('POST', `/api/sessions/${s.id}/start`);
+    t.advance(3);
+    await t.call('POST', '/api/timer/pause');
+    t.advance(2);
+    await t.call('POST', '/api/timer/resume');
+    t.advance(7);
+    expect((await t.call('GET', '/api/today')).body.timer).toMatchObject({
+      paused: true,
+      remainingMs: 0,
+      activeMs: 10 * 60_000,
+      autoPause: { reason: 'deadline', from: s.end },
+    });
+    t.advance(15);
+    expect((await t.call('POST', '/api/timer/resume')).status).toBe(409);
+    const input = { sessionId: s.id, continueBeyondPlan: true };
+    expect((await t.call('POST', '/api/timer/resume', input)).body).toMatchObject({
+      paused: false,
+      overtime: true,
+      activeMs: 10 * 60_000,
+    });
+    t.advance(4);
+    expect((await t.call('POST', '/api/timer/resume', input)).body.activeMs).toBe(14 * 60_000);
+    const done = await t.call('POST', '/api/timer/finish', { sessionId: s.id });
+    expect(done.body).toMatchObject({
+      focusMinutes: 14,
+      activeMinutes: 14,
+      endedEarly: false,
+      session: { end: s.end },
+    });
   });
 
   it('сон компьютера: пауза с момента сна, можно продолжить или засчитать', async () => {

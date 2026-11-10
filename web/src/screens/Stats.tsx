@@ -1,21 +1,22 @@
-import { plural, SESSION_FORMS } from '@ou/engine';
+import { durationMinutes, plannedFocusMinutes, plural, SESSION_FORMS } from '@ou/engine';
 import {
   BarChart3,
   CalendarCheck2,
   Flame,
   Hourglass,
   LineChart,
-  TrendingUp,
+  ChevronDown,
+  PieChart,
   Wallet,
 } from 'lucide-react';
 import { DateTime } from 'luxon';
 import { useState, type ReactNode } from 'react';
 import { useAccent, useColor, useColors } from '../colors';
 import { BudgetView } from '../components';
-import { formatHours, formatPercent, local, weekStart } from '../format';
+import { formatDuration, formatHours, formatPercent, local, weekStart } from '../format';
 import { useApi } from '../hooks';
-import type { SessionView, Stats, Today } from '../types';
-import { Alert, Card, Empty, Loading, PageHeader, Progress, Segmented, Stat } from '../ui';
+import type { AppSettings, SessionView, Stats, Today } from '../types';
+import { Alert, Card, Empty, Loading, PageHeader, Progress, Segmented, ErrorText } from '../ui';
 
 const pct = (v: number | null) => (v === null ? '—' : formatPercent(v));
 
@@ -59,21 +60,18 @@ interface WeekBar {
   total: number;
 }
 
-/** Шаг шкалы, при котором делений не больше четырёх. */
-function niceTop(maxHours: number): { top: number; step: number } {
-  const step = [0.5, 1, 2, 5, 10, 20].find((s) => maxHours / s <= 4) ?? 50;
-  return { top: Math.max(step, Math.ceil(maxHours / step) * step), step };
-}
-
-const hoursLabel = (h: number) => `${String(h).replace('.', ',')} ч`;
-
 /** Чистая учёба по неделям семестра, по дисциплинам. Только факт — план показан полосами выше. */
 function WeeklyChart({ stats, today }: { stats: Stats; today: Today }) {
   const zone = today.timezone;
   const from = DateTime.fromISO(stats.semester.startDate, { zone }).toMillis();
-  const { data, error } = useApi<SessionView[]>(`/api/schedule?from=${from}&to=${today.now}`);
+  const end = DateTime.fromISO(stats.semester.endDate, { zone }).plus({ days: 1 }).toMillis();
+  const to = Math.min(today.now, end);
+  const { data, error } = useApi<SessionView[]>(
+    to > from ? `/api/schedule?from=${from}&to=${to}` : null,
+  );
+  const needsSettings = data?.some((s) => s.status === 'held' && s.actualMinutes == null);
+  const settings = useApi<AppSettings>(needsSettings ? '/api/settings' : null);
   const colorOf = useColors();
-  const [hover, setHover] = useState<number | null>(null);
   const [view, setView] = useState<'chart' | 'table'>('chart');
   const series = stats.disciplines.map((d) => ({ id: d.disciplineId, name: d.name }));
 
@@ -95,15 +93,13 @@ function WeeklyChart({ stats, today }: { stats: Stats; today: Today }) {
       {body}
     </Card>
   );
-  if (!data) return card(<Loading error={error} height={200} />);
+  if (to <= from) return card(<p className="muted">Семестр ещё не начался.</p>);
+  if (!data || (needsSettings && !settings.data))
+    return card(<Loading error={error ?? settings.error} height={160} />);
 
   const thisWeek = weekStart(today.now, zone);
   const weeks: WeekBar[] = [];
-  for (
-    let w = local(weekStart(from, zone), zone);
-    w.toMillis() <= thisWeek;
-    w = w.plus({ weeks: 1 })
-  ) {
+  for (let w = local(weekStart(from, zone), zone); w.toMillis() < to; w = w.plus({ weeks: 1 })) {
     weeks.push({
       start: w.toMillis(),
       // Первая неделя подписана датой начала семестра, а не понедельником до него.
@@ -117,15 +113,22 @@ function WeeklyChart({ stats, today }: { stats: Stats; today: Today }) {
     });
   }
   for (const s of data) {
-    if (s.status !== 'held' || !s.actualMinutes) continue;
+    if (s.status !== 'held') continue;
+    const minutes =
+      s.actualMinutes ?? plannedFocusMinutes(durationMinutes(s), settings.data!.pomodoro);
     const week = weeks.find((w) => w.start === weekStart(s.start, zone));
     if (!week) continue;
-    week.minutes.set(s.disciplineId, (week.minutes.get(s.disciplineId) ?? 0) + s.actualMinutes);
-    week.total += s.actualMinutes;
+    week.minutes.set(s.disciplineId, (week.minutes.get(s.disciplineId) ?? 0) + minutes);
+    week.total += minutes;
   }
-  const { top, step } = niceTop(Math.max(0, ...weeks.map((w) => w.total)) / 60);
-  const ticks = Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step);
-  const empty = weeks.every((w) => w.total === 0);
+  weeks.reverse();
+  const max = Math.max(0, ...weeks.map((w) => w.total));
+  if (!max)
+    return card(
+      <Empty icon={<LineChart size={26} />} title="Пока нет учебного времени">
+        Здесь появятся недели с проведёнными занятиями.
+      </Empty>,
+    );
 
   if (view === 'table') {
     return card(
@@ -148,10 +151,10 @@ function WeeklyChart({ stats, today }: { stats: Stats; today: Today }) {
                 <td>{w.label}</td>
                 {series.map((d) => (
                   <td key={d.id} className="num">
-                    {formatHours(w.minutes.get(d.id) ?? 0)}
+                    {formatDuration(w.minutes.get(d.id) ?? 0)}
                   </td>
                 ))}
-                <td className="num">{formatHours(w.total)}</td>
+                <td className="num">{formatDuration(w.total)}</td>
               </tr>
             ))}
           </tbody>
@@ -161,78 +164,45 @@ function WeeklyChart({ stats, today }: { stats: Stats; today: Today }) {
   }
 
   return card(
-    <div className="stack">
-      {series.length > 1 && (
-        <div className="row" style={{ gap: 16 }}>
-          {series.map((d) => (
-            <span key={d.id} className="row small muted" style={{ gap: 6 }}>
-              <span className="dot" style={{ background: colorOf(d.id).accent }} />
-              {d.name}
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="wchart">
-        <div className="wchart-plot">
-          {ticks.map((t) => (
-            <div key={t} className="wchart-grid" style={{ bottom: `${(t / top) * 100}%` }}>
-              <span>{hoursLabel(t)}</span>
-            </div>
-          ))}
-          <div className="wchart-cols">
-            {weeks.map((w, i) => (
-              <div
-                key={w.start}
-                className="wchart-col"
-                onMouseEnter={() => setHover(i)}
-                onMouseLeave={() => setHover(null)}
-              >
-                <div className="wchart-stack" style={{ height: `${(w.total / 60 / top) * 100}%` }}>
-                  {series
-                    .filter((d) => (w.minutes.get(d.id) ?? 0) > 0)
-                    .map((d) => (
-                      <span
-                        key={d.id}
-                        style={{ flexGrow: w.minutes.get(d.id), background: colorOf(d.id).accent }}
-                      />
-                    ))}
-                </div>
-                {hover === i && (
-                  <div
-                    className={`wchart-tip ${i < 2 ? 'left' : i > weeks.length - 3 ? 'right' : ''}`}
-                    style={{ bottom: `calc(${(w.total / 60 / top) * 100}% + 8px)` }}
-                  >
-                    <strong>Неделя с {w.label}</strong>
-                    {series.map((d) => (
-                      <span key={d.id} className="row between" style={{ gap: 12 }}>
-                        <span className="row" style={{ gap: 6 }}>
-                          <span className="dot" style={{ background: colorOf(d.id).accent }} />
-                          {d.name}
-                        </span>
-                        {formatHours(w.minutes.get(d.id) ?? 0)}
-                      </span>
-                    ))}
-                    <span className="row between" style={{ gap: 12 }}>
-                      <span>Всего</span>
-                      <strong>{formatHours(w.total)}</strong>
-                    </span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="wchart-x">
-          {weeks.map((w) => (
-            <span key={w.start} className={w.current ? 'current' : ''}>
+    <div className="stats-weeks">
+      {weeks.map((w) => (
+        <details key={w.start} className="stats-week">
+          <summary>
+            <span className="stats-week-label">
               {w.label}
+              {w.current && <small>Эта неделя</small>}
             </span>
-          ))}
-        </div>
-      </div>
-      {empty && (
-        <p className="faint">Пока нет проведённых занятий — график заполнится по ходу семестра.</p>
-      )}
+            <span className="stats-week-track" aria-hidden="true">
+              {series.map((d) => {
+                const minutes = w.minutes.get(d.id);
+                return minutes ? (
+                  <i
+                    key={d.id}
+                    style={{ width: `${(minutes / max) * 100}%`, background: colorOf(d.id).accent }}
+                  />
+                ) : null;
+              })}
+            </span>
+            <strong>{formatDuration(w.total)}</strong>
+            <ChevronDown size={15} />
+          </summary>
+          <div className="stats-week-detail">
+            {w.total ? (
+              series
+                .filter((d) => w.minutes.has(d.id))
+                .map((d) => (
+                  <div key={d.id}>
+                    <span className="dot" style={{ background: colorOf(d.id).accent }} />
+                    {d.name}
+                    <strong>{formatDuration(w.minutes.get(d.id)!)}</strong>
+                  </div>
+                ))
+            ) : (
+              <span>Нет учебного времени</span>
+            )}
+          </div>
+        </details>
+      ))}
     </div>,
   );
 }
@@ -272,14 +242,58 @@ function DisciplineTable({ rows }: { rows: Row[] }) {
   );
 }
 
+function TimeDistribution({ rows, total }: { rows: Row[]; total: number }) {
+  const colorOf = useColors();
+  const sorted = [...rows]
+    .filter((d) => d.actualMinutes > 0)
+    .sort((a, b) => b.actualMinutes - a.actualMinutes);
+  return (
+    <Card title="Время по дисциплинам" icon={<PieChart size={19} />}>
+      {total ? (
+        <>
+          <div className="stats-band" aria-hidden="true">
+            {sorted.map((d) => (
+              <i
+                key={d.disciplineId}
+                style={{ flex: d.actualMinutes, background: colorOf(d.disciplineId).accent }}
+              />
+            ))}
+          </div>
+          <ul className="stats-shares">
+            {sorted.map((d) => (
+              <li key={d.disciplineId}>
+                <span className="dot" style={{ background: colorOf(d.disciplineId).accent }} />
+                <span>{d.name}</span>
+                <strong>{formatDuration(d.actualMinutes)}</strong>
+                <small>{formatPercent(d.actualMinutes / total)}</small>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <Empty icon={<Hourglass size={26} />} title="Первое занятие ещё впереди">
+          После занятия здесь будет видно, на какие дисциплины ушло время.
+        </Empty>
+      )}
+    </Card>
+  );
+}
+
 export function StatsScreen({ today }: { today: Today }) {
   const { data, error } = useApi<Stats | null>('/api/stats');
   const [view, setView] = useState<'bars' | 'table'>('bars');
+  const [section, setSection] = useState<'overview' | 'weeks' | 'plan'>('overview');
   const header = (
     <PageHeader
       icon={<BarChart3 size={24} />}
       title="Статистика"
-      subtitle="Время — только чистая учёба, без перерывов Помодоро"
+      subtitle={
+        data
+          ? [data.semester.startDate, data.semester.endDate]
+              .map((date) => DateTime.fromISO(date).setLocale('ru').toFormat('d MMM yyyy'))
+              .join(' — ')
+          : undefined
+      }
     />
   );
   if (data === undefined) {
@@ -311,79 +325,115 @@ export function StatsScreen({ today }: { today: Today }) {
   const names = new Map(rows.map((s) => [s.disciplineId, s.name]));
 
   return (
-    <>
+    <div className="stats-page">
       {header}
-      <div className="stack-lg">
-        <div className="grid-4">
-          <Stat
-            icon={<Flame size={16} color="var(--violet)" />}
-            label="Серия без пропусков"
-            value={data.streak}
-            note={plural(data.streak, SESSION_FORMS) + ' подряд'}
-          />
-          <Stat
-            icon={<Hourglass size={16} color="var(--primary)" />}
-            label="Чистая учёба"
-            value={formatHours(actual)}
-            note={`из ${formatHours(planned)} за семестр`}
-          />
-          <Stat
-            icon={<CalendarCheck2 size={16} color="var(--primary)" />}
-            label="Посещаемость"
-            value={held + missed > 0 ? formatPercent(held / (held + missed)) : '—'}
-            note={`${held} из ${held + missed} ${plural(held + missed, SESSION_FORMS)}`}
-          />
-          <Stat
-            icon={<TrendingUp size={16} color="var(--violet)" />}
-            label="Прогноз к концу"
-            value={pct(data.forecast.overall)}
-            note={data.forecast.overall === null ? 'пока рано судить' : 'плана при нынешнем темпе'}
-          />
+      <ErrorText error={error} />
+      <section className="stats-summary" aria-label="Итоги семестра">
+        <div className="stats-time">
+          <span>
+            <Hourglass size={16} />
+            Чистое время учёбы
+          </span>
+          <strong>{formatDuration(actual)}</strong>
+          <small>За семестр, без перерывов</small>
         </div>
+        <div className="stats-metric">
+          <span>
+            <CalendarCheck2 size={16} />
+            Посещаемость
+          </span>
+          <strong>{held + missed ? formatPercent(held / (held + missed)) : '—'}</strong>
+          <small>
+            Проведено {held} · пропущено {missed}
+          </small>
+        </div>
+        <div className="stats-metric">
+          <span>
+            <Flame size={16} />
+            Без пропусков
+          </span>
+          <strong>{data.streak}</strong>
+          <small>{plural(data.streak, SESSION_FORMS)} подряд</small>
+        </div>
+      </section>
+      <div className="stats-nav" role="group" aria-label="Раздел статистики">
+        {(
+          [
+            { id: 'overview', label: 'Обзор' },
+            { id: 'weeks', label: 'По неделям' },
+            { id: 'plan', label: 'План' },
+          ] as const
+        ).map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            aria-pressed={section === item.id}
+            onClick={() => setSection(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {section === 'overview' && <TimeDistribution rows={rows} total={actual} />}
+      {section === 'weeks' && <WeeklyChart key={data.semester.id} stats={data} today={today} />}
+      {section === 'plan' && (
+        <div className="stack-lg">
+          <Card title="План семестра" icon={<BarChart3 size={18} />}>
+            <div className="stats-plan-line">
+              <strong>
+                {formatDuration(actual)} из {formatDuration(planned)}
+              </strong>
+              <span>{planned ? formatPercent(actual / planned) : '—'}</span>
+            </div>
+            <Progress value={planned ? actual / planned : 0} label="Выполнение плана семестра" />
+            <p className="stats-forecast">
+              {data.forecast.overall === null
+                ? 'Для прогноза пока мало данных.'
+                : `Прогноз к концу семестра при текущем темпе — ${pct(data.forecast.overall)} плана.`}
+            </p>
+          </Card>
+          <Card
+            title="По дисциплинам"
+            icon={<BarChart3 size={19} color="var(--primary)" />}
+            action={
+              <Segmented
+                value={view}
+                options={[
+                  { value: 'bars', label: 'Полосы' },
+                  { value: 'table', label: 'Таблица' },
+                ]}
+                onChange={setView}
+              />
+            }
+          >
+            {view === 'bars' ? (
+              <div className="stack-lg">
+                {rows.map((s) => (
+                  <DisciplineMeter key={s.disciplineId} s={s} />
+                ))}
+              </div>
+            ) : (
+              <DisciplineTable rows={rows} />
+            )}
+          </Card>
 
-        <Card
-          title="По дисциплинам"
-          icon={<BarChart3 size={19} color="var(--primary)" />}
-          action={
-            <Segmented
-              value={view}
-              options={[
-                { value: 'bars', label: 'Полосы' },
-                { value: 'table', label: 'Таблица' },
-              ]}
-              onChange={setView}
-            />
-          }
-        >
-          {view === 'bars' ? (
-            <div className="stack-lg">
-              {rows.map((s) => (
-                <DisciplineMeter key={s.disciplineId} s={s} />
+          {data.calibration.length > 0 && (
+            <div className="stack">
+              {data.calibration.map((c) => (
+                <Alert key={c.disciplineId}>
+                  «{names.get(c.disciplineId)}»: медианная длительность занятий —{' '}
+                  {Math.round(c.medianActualMinutes)} из {c.currentMinutes} мин — можно сделать{' '}
+                  {c.suggestedMinutes}.
+                </Alert>
               ))}
             </div>
-          ) : (
-            <DisciplineTable rows={rows} />
           )}
-        </Card>
 
-        {data.calibration.length > 0 && (
-          <div className="stack">
-            {data.calibration.map((c) => (
-              <Alert key={c.disciplineId}>
-                «{names.get(c.disciplineId)}»: занятия в среднем идут{' '}
-                {Math.round(c.medianActualMinutes)} из {c.currentMinutes} мин — можно сделать{' '}
-                {c.suggestedMinutes}.
-              </Alert>
-            ))}
-          </div>
-        )}
-
-        <WeeklyChart stats={data} today={today} />
-
-        <Card title="Бюджет недели" icon={<Wallet size={19} color="var(--violet)" />}>
-          <BudgetView budget={data.budget} disciplines={data.semester.disciplines} />
-        </Card>
-      </div>
-    </>
+          <Card title="Бюджет недели" icon={<Wallet size={19} color="var(--violet)" />}>
+            <BudgetView budget={data.budget} disciplines={data.semester.disciplines} />
+          </Card>
+        </div>
+      )}
+    </div>
   );
 }

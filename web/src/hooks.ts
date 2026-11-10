@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { api, errorText } from './api';
+import { api, ApiError, errorText } from './api';
 
 /** Счётчик изменений: после любого действия данные на всех экранах загружаются заново. */
 export const RefreshContext = createContext<{ version: number; refresh: () => void }>({
@@ -28,7 +28,10 @@ export function useApi<T>(url: string | null) {
         setError(null);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(errorText(e));
+        if (!cancelled) {
+          if (e instanceof ApiError && (e.status === 404 || e.status === 409)) setData(undefined);
+          setError(errorText(e));
+        }
       });
     return () => {
       cancelled = true;
@@ -40,7 +43,7 @@ export function useApi<T>(url: string | null) {
 }
 
 /**
- * Выполнить действие: показывает ошибку, после успеха обновляет все экраны.
+ * Выполнить действие: показывает ошибку, после попытки обновляет все экраны.
  * Возвращает результат или undefined, если не получилось.
  */
 export function useAction() {
@@ -53,12 +56,13 @@ export function useAction() {
       setError(null);
       try {
         const result = await action();
-        refresh();
         return result;
       } catch (e) {
         setError(errorText(e));
         return undefined;
       } finally {
+        // Действие могло выполниться на сервере, даже если его ответ потерялся.
+        refresh();
         setBusy(false);
       }
     },

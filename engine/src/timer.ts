@@ -13,7 +13,7 @@ export const DEFAULT_POMODORO: PomodoroSettings = {
  * время занятия вышло, а страница давно закрыта (`away`).
  */
 export interface AutoPause {
-  reason: 'sleep' | 'away';
+  reason: 'sleep' | 'away' | 'deadline';
   from: Instant;
   /** Когда компьютер проснулся — для `sleep`. */
   to?: Instant;
@@ -31,6 +31,8 @@ export interface TimerState {
   pausedAt?: Instant;
   /** Сколько уже простояло на паузе до текущей паузы. */
   pausedMs: number;
+  /** Пользователь явно продолжил занятие за пределами плана. */
+  overtimeFrom?: Instant;
   autoPause?: AutoPause;
 }
 
@@ -98,9 +100,9 @@ export function autoPauseTimer(
   };
 }
 
-/** Когда закончится запланированное время, если не ставить на паузу. */
+/** Запланированный конец занятия. Паузы не сдвигают границу в календаре. */
 export function plannedEndAt(t: TimerState): Instant {
-  return t.startedAt + t.pausedMs + t.plannedMinutes * MINUTE;
+  return t.startedAt + t.plannedMinutes * MINUTE;
 }
 
 export function activeMs(t: TimerState, now: Instant): number {
@@ -159,8 +161,8 @@ export function timerView(
     activeMs: active,
     focusMs: where.focusMs,
     plannedMs,
-    remainingMs: Math.max(0, plannedMs - active),
-    overtime: active > plannedMs,
+    remainingMs: Math.max(0, plannedEndAt(t) - now),
+    overtime: t.overtimeFrom !== undefined || active > plannedMs,
     ...(t.autoPause && t.pausedAt !== undefined ? { autoPause: t.autoPause } : {}),
   };
 }
@@ -183,7 +185,7 @@ export function finishTimer(
   return {
     focusMinutes: Math.round(view.focusMs / MINUTE),
     activeMinutes: Math.round(view.activeMs / MINUTE),
-    endedEarly: view.activeMs < view.plannedMs - MINUTE,
+    endedEarly: view.remainingMs > MINUTE,
   };
 }
 

@@ -13,6 +13,7 @@ describe('GET /api/health', () => {
     const res = await app.inject({ method: 'GET', url: '/api/health' });
 
     expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
     expect(res.json()).toEqual({
       status: 'ok',
       engineVersion: ENGINE_VERSION,

@@ -20,6 +20,7 @@ import { z } from 'zod';
 import type { SemesterRecord, SourceRecord, SummaryRecord } from '../db/store';
 import { conflict, notFound } from '../errors';
 import { appSettings, planContext, requireActive, type Deps } from './context';
+import { awardLesson, type StudyAward } from './progress';
 
 /** Начать занятие можно за полчаса до него и до конца его времени. */
 const EARLY_START_MINUTES = 30;
@@ -73,6 +74,7 @@ export function schedule(deps: Deps, from?: Instant, to?: Instant): SessionView[
 }
 
 export interface SessionDetails {
+  nextQuestion: string;
   session: SessionView;
   goal: string;
   metrics: string;
@@ -87,6 +89,7 @@ export function sessionDetails(deps: Deps, id: string): SessionDetails {
   const d = deps.store.getDiscipline(s.disciplineId);
   return {
     session: toView(deps, sem, s),
+    nextQuestion: deps.store.latestQuestion(s.disciplineId, s.start),
     goal: d?.goal ?? '',
     metrics: d?.metrics ?? '',
     continueHint: d?.continueHint ?? '',
@@ -157,13 +160,26 @@ export function startUnplanned(deps: Deps, disciplineId: string): TimerView {
 }
 
 export function currentTimer(deps: Deps): TimerView | null {
-  const t = deps.store.getTimer();
+  const t = timerAtDeadline(deps);
   return t ? timerView(t.state, deps.now(), appSettings(deps.store).pomodoro) : null;
 }
 
-function requireTimer(deps: Deps) {
+/** Проверяем границу и на чтении, и перед любой командой, даже если браузер был закрыт. */
+function timerAtDeadline(deps: Deps, reason: 'deadline' | 'away' = 'deadline') {
   const t = deps.store.getTimer();
+  if (!t || t.state.overtimeFrom !== undefined) return t;
+  const end = plannedEndAt(t.state);
+  if (deps.now() < end || (t.state.pausedAt !== undefined && t.state.pausedAt <= end)) return t;
+  // Старые таймеры могли быть вручную поставлены на паузу уже после конца занятия.
+  const paused = { ...t, state: autoPauseTimer(countPausedTime(t.state), reason, end) };
+  deps.store.setTimer(paused);
+  return paused;
+}
+
+function requireTimer(deps: Deps, sessionId?: string) {
+  const t = timerAtDeadline(deps);
   if (!t) throw conflict('Сейчас ничего не идёт');
+  if (sessionId && t.state.sessionId !== sessionId) throw conflict('Сейчас идёт другое занятие');
   return t;
 }
 
@@ -174,12 +190,28 @@ export function pause(deps: Deps): TimerView {
   return timerView(state, deps.now(), appSettings(deps.store).pomodoro);
 }
 
-export const resumeInput = z.object({ countPaused: z.boolean().default(false) });
+export const resumeInput = z.object({
+  countPaused: z.boolean().default(false),
+  continueBeyondPlan: z.boolean().default(false),
+  sessionId: z.string().optional(),
+});
 
 /** Продолжить; `countPaused` — «я занимался — засчитать»: время паузы идёт в учёбу. */
-export function resume(deps: Deps, countPaused = false): TimerView {
-  const t = requireTimer(deps);
-  const state = countPaused ? countPausedTime(t.state) : resumeTimer(t.state, deps.now());
+export function resume(deps: Deps, input: z.infer<typeof resumeInput>): TimerView {
+  const t = requireTimer(deps, input.sessionId);
+  const now = deps.now();
+  const end = plannedEndAt(t.state);
+  const expired = now >= end && t.state.overtimeFrom === undefined;
+  let state = t.state;
+  if (input.countPaused && state.autoPause?.reason === 'sleep') {
+    state = countPausedTime(state);
+    if (expired) state = autoPauseTimer(state, 'deadline', end);
+  } else {
+    if (expired && !input.continueBeyondPlan)
+      throw conflict('Время вышло. Выбери продолжение сверх плана.');
+    state = resumeTimer(state, now);
+    if (expired) state = { ...state, overtimeFrom: now };
+  }
   deps.store.setTimer({ ...t, state });
   return timerView(state, deps.now(), appSettings(deps.store).pomodoro);
 }
@@ -191,7 +223,15 @@ export function resume(deps: Deps, countPaused = false): TimerView {
 export function pauseForSleep(deps: Deps, from: Instant, to: Instant): void {
   const t = deps.store.getTimer();
   if (!t || t.state.pausedAt !== undefined) return;
-  deps.store.setTimer({ ...t, state: autoPauseTimer(t.state, 'sleep', from, to) });
+  const end = plannedEndAt(t.state);
+  if (t.state.overtimeFrom === undefined && from >= end) {
+    timerAtDeadline(deps);
+  } else {
+    deps.store.setTimer({
+      ...t,
+      state: autoPauseTimer(t.state, 'sleep', Math.max(from, t.state.overtimeFrom ?? from), to),
+    });
+  }
 }
 
 /**
@@ -199,14 +239,13 @@ export function pauseForSleep(deps: Deps, from: Instant, to: Instant): void {
  * таймер встаёт на конце занятия, а не тикает до утра.
  */
 export function pauseIfAway(deps: Deps, lastSeen: Instant, awayMs: number): void {
-  const t = deps.store.getTimer();
+  const away = deps.now() - lastSeen >= awayMs;
+  const t = timerAtDeadline(deps, away ? 'away' : 'deadline');
   if (!t || t.state.pausedAt !== undefined) return;
-  const now = deps.now();
-  const end = plannedEndAt(t.state);
-  if (now <= end || now - lastSeen < awayMs) return;
+  if (!away || t.state.overtimeFrom === undefined) return;
   deps.store.setTimer({
     ...t,
-    state: autoPauseTimer(t.state, 'away', Math.max(lastSeen, end)),
+    state: autoPauseTimer(t.state, 'away', Math.max(lastSeen, t.state.overtimeFrom)),
   });
 }
 
@@ -218,9 +257,9 @@ export interface FinishResult {
 }
 
 /** Завершить можно в любой момент — записывается, сколько было на самом деле. Дальше — итог. */
-export function finish(deps: Deps): FinishResult {
+export function finish(deps: Deps, sessionId?: string): FinishResult {
   const { store } = deps;
-  const t = requireTimer(deps);
+  const t = requireTimer(deps, sessionId);
   const sem = store.getSemester(t.semesterId);
   if (!sem) throw notFound('Семестр');
   const s = requireSession(deps, sem, t.state.sessionId);
@@ -233,7 +272,9 @@ export function finish(deps: Deps): FinishResult {
     elapsedMinutes: result.activeMinutes,
     finishedAt: now,
     // Внеплановое занятие в календаре занимает столько, сколько длилось на самом деле.
-    ...(s.origin === 'unplanned' ? { end: Math.max(s.start + MINUTE, now) } : {}),
+    ...(s.origin === 'unplanned'
+      ? { end: Math.max(s.start + MINUTE, t.state.pausedAt ?? now) }
+      : {}),
   };
   store.transaction(() => {
     store.saveSession(sem.id, held);
@@ -247,6 +288,7 @@ export const summaryInput = z
     keyConcepts: z.string().trim().max(10_000).default(''),
     retelling: z.string().trim().max(20_000).default(''),
     continueFrom: z.string().trim().max(2000).default(''),
+    nextQuestion: z.string().trim().max(2000).default(''),
   })
   .refine((v) => v.keyConcepts.length > 0 || v.retelling.length > 0, {
     message: 'Запиши хотя бы ключевые понятия или короткий пересказ',
@@ -257,7 +299,7 @@ export function saveSummary(
   deps: Deps,
   id: string,
   input: z.infer<typeof summaryInput>,
-): SummaryRecord {
+): SummaryRecord & { award: StudyAward | null } {
   const { store } = deps;
   const sem = requireActive(store);
   const s = requireSession(deps, sem, id);
@@ -270,14 +312,15 @@ export function saveSummary(
     ...input,
     createdAt: deps.now(),
   };
-  store.transaction(() => {
+  const award = store.transaction(() => {
     store.saveSummary(summary);
     if (input.continueFrom) {
       const d = store.getDiscipline(s.disciplineId);
       if (d) store.saveDiscipline({ ...d, continueHint: input.continueFrom });
     }
+    return awardLesson(deps, sem.id, s);
   });
-  return summary;
+  return { ...summary, award };
 }
 
 export const moveInput = z.object({

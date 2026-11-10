@@ -13,6 +13,8 @@ import {
   addSource,
   archiveDiscipline,
   createDiscipline,
+  deleteDiscipline,
+  disciplineDeletion,
   deleteSource,
   disciplineInput,
   disciplinePatch,
@@ -24,6 +26,7 @@ import {
 } from './domain/disciplines';
 import { exportSummaries, summariesMarkdown } from './domain/maintenance';
 import { stats, today } from './domain/overview';
+import { practiceInput, practicePrompt, practiceSummaries } from './domain/practice';
 import {
   applyChange,
   applyDraftCompromise,
@@ -56,14 +59,19 @@ import {
   unplannedInput,
 } from './domain/sessions';
 import { appSettingsSchema } from './settings';
+import { deleteSemester } from './google/sync';
+import { registerProgressRoutes } from './progress-routes';
 
 const idParam = z.object({ id: z.string().min(1) });
 const indexParam = z.object({ index: z.coerce.number().int().min(0) });
 
 export function registerRoutes(app: FastifyInstance, deps: Deps): void {
+  registerProgressRoutes(app, deps);
   // Главный экран и статистика
   app.get('/api/today', () => today(deps));
   app.get('/api/stats', () => stats(deps));
+  app.get('/api/practice/summaries', () => practiceSummaries(deps));
+  app.post('/api/practice/prompt', (req) => practicePrompt(deps, practiceInput.parse(req.body)));
 
   // Настройки
   app.get('/api/settings', () => appSettings(deps.store));
@@ -84,7 +92,15 @@ export function registerRoutes(app: FastifyInstance, deps: Deps): void {
   });
   app.get('/api/disciplines/:id', (req) => {
     const { id } = idParam.parse(req.params);
-    return { ...getDiscipline(deps, id), sources: deps.store.listSources(id) };
+    return {
+      ...getDiscipline(deps, id),
+      sources: deps.store.listSources(id),
+      deletion: disciplineDeletion(deps, id),
+    };
+  });
+  app.delete('/api/disciplines/:id', (req, reply) => {
+    deleteDiscipline(deps, idParam.parse(req.params).id);
+    return reply.status(204).send();
   });
   app.patch('/api/disciplines/:id', (req) =>
     updateDiscipline(deps, idParam.parse(req.params).id, disciplinePatch.parse(req.body)),
@@ -125,6 +141,10 @@ export function registerRoutes(app: FastifyInstance, deps: Deps): void {
   );
   app.post('/api/semesters/draft/confirm', () => confirmDraft(deps));
   app.get('/api/semesters/active', () => getActive(deps));
+  app.delete('/api/semesters/:id', async (req, reply) => {
+    await deleteSemester(deps, idParam.parse(req.params).id);
+    return reply.status(204).send();
+  });
   app.post('/api/semesters/active/changes/preview', (req) =>
     previewChange(deps, changeInput.parse(req.body)),
   );
@@ -154,10 +174,10 @@ export function registerRoutes(app: FastifyInstance, deps: Deps): void {
   // Таймер идущего занятия
   app.get('/api/timer', () => currentTimer(deps));
   app.post('/api/timer/pause', () => pause(deps));
-  app.post('/api/timer/resume', (req) =>
-    resume(deps, resumeInput.parse(req.body ?? {}).countPaused),
+  app.post('/api/timer/resume', (req) => resume(deps, resumeInput.parse(req.body ?? {})));
+  app.post('/api/timer/finish', (req) =>
+    finish(deps, z.object({ sessionId: z.string().optional() }).parse(req.body ?? {}).sessionId),
   );
-  app.post('/api/timer/finish', () => finish(deps));
 
   // Решения: вопросы сервиса
   app.get('/api/decisions', () => listDecisions(deps));

@@ -44,7 +44,7 @@ export function engineSettingsFor(store: Store, sem: SemesterRecord): Settings {
 /** Дисциплины семестра для движка: карточка плюс то, о чём договорились в компромиссах. */
 export function engineDisciplines(store: Store, sem: SemesterRecord): Discipline[] {
   return sem.disciplineIds.map((id) => {
-    const d = store.getDiscipline(id);
+    const d = store.getDiscipline(id, true);
     if (!d) throw notFound(`Дисциплина ${id}`);
     const patch = sem.disciplinePatches[id] ?? {};
     return {

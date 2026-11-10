@@ -3,10 +3,8 @@ import {
   CalendarCheck2,
   CalendarPlus,
   CalendarRange,
-  Clock3,
   GitCompareArrows,
   Layers,
-  ListChecks,
   RefreshCw,
   Trash2,
   Wallet,
@@ -30,41 +28,37 @@ import {
   Option,
   PageHeader,
   Segmented,
-  Stat,
 } from '../ui';
 
 const dateLabel = (iso: string) => local(Date.parse(iso), 'UTC').setLocale('ru').toFormat('d MMMM');
 
 function SemesterStats({ sem }: { sem: SemesterView }) {
+  const week = sem.currentWeek;
   return (
-    <div className="grid-4">
-      <Stat
-        icon={<CalendarRange size={16} />}
-        label="Длительность"
-        value={`${sem.fullWeeks} нед.`}
-        note={
-          sem.leadDays > 0
-            ? `+ ${sem.leadDays} дн. в начале`
-            : `${dateLabel(sem.startDate)} — ${dateLabel(sem.endDate)}`
-        }
-      />
-      <Stat
-        icon={<Clock3 size={16} />}
-        label="Сейчас"
-        value={
-          sem.currentWeek !== null && sem.currentWeek > 0
-            ? `${sem.currentWeek}-я неделя`
-            : 'скоро старт'
-        }
-        note={`до ${dateLabel(sem.endDate)}`}
-      />
-      <Stat icon={<ListChecks size={16} />} label="Занятий в семестре" value={sem.sessionsCount} />
-      <Stat
-        icon={<Wallet size={16} />}
-        label="В неделю"
-        value={sem.budget ? formatHours(sem.budget.averageMinutes) : '—'}
-        note={sem.budget ? `лимит ${formatHours(sem.budget.capMinutes)}` : undefined}
-      />
+    <div className="semester-metrics">
+      <div>
+        <span>
+          <CalendarRange size={15} />
+          Период
+        </span>
+        <strong>
+          {week && week > 0 ? `Неделя ${week} из ${sem.fullWeeks}` : `${sem.fullWeeks} нед.`}
+        </strong>
+        {sem.leadDays > 0 && <small>+ {sem.leadDays} дн. в начале</small>}
+      </div>
+      <div>
+        <span>
+          <Layers size={15} />
+          Занятий в семестре
+        </span>
+        <strong>{sem.sessionsCount}</strong>
+      </div>
+      <div>
+        <span>
+          <Wallet size={15} />В неделю
+        </span>
+        <strong>{sem.budget ? formatHours(sem.budget.averageMinutes) : '—'}</strong>
+      </div>
     </div>
   );
 }
@@ -96,39 +90,80 @@ function MovedRow({
 }
 
 function SemesterSummary({ sem, zone }: { sem: SemesterView; zone: string }) {
+  const [view, setView] = useState<'week' | 'budget' | 'manage'>(
+    sem.deletionPending ? 'manage' : 'week',
+  );
+  const active = sem.status === 'active';
   const names = new Map(sem.disciplines.map((d) => [d.id, d.name]));
   return (
-    <div className="stack-lg">
+    <div className="semester-home">
       {sem.warnings.map((w, i) => (
         <Alert tone="warning" key={i}>
           {w.message}
         </Alert>
       ))}
       <SemesterStats sem={sem} />
-      {sem.budget && (
-        <Card title="Бюджет недели" icon={<Wallet size={19} color="var(--primary)" />}>
-          <BudgetView budget={sem.budget} disciplines={sem.disciplines} />
-        </Card>
+      <div className="stats-nav semester-nav" role="group" aria-label="Раздел семестра">
+        <button type="button" aria-pressed={view === 'week'} onClick={() => setView('week')}>
+          Неделя
+        </button>
+        <button type="button" aria-pressed={view === 'budget'} onClick={() => setView('budget')}>
+          Нагрузка
+        </button>
+        {active && (
+          <button type="button" aria-pressed={view === 'manage'} onClick={() => setView('manage')}>
+            Управление
+          </button>
+        )}
+      </div>
+      {active && sem.deletionPending && view !== 'manage' && (
+        <Button variant="secondary" onClick={() => setView('manage')}>
+          Перейти к незавершённому удалению
+        </Button>
       )}
-      <Card title="Типичная неделя" icon={<Layers size={19} color="var(--violet)" />}>
-        <SkeletonGrid slots={sem.skeleton} names={names} />
-      </Card>
-      {sem.moved.length > 0 && (
-        <Card
-          title="Перенесено из-за событий в календаре"
-          icon={<GitCompareArrows size={19} color="var(--primary)" />}
-        >
-          <div className="stack">
-            {sem.moved.map((m) => (
-              <MovedRow
-                key={m.sessionId}
-                m={m}
-                name={names.get(m.disciplineId) ?? ''}
-                zone={zone}
-              />
-            ))}
-          </div>
-        </Card>
+      {view === 'budget' &&
+        (sem.budget ? (
+          <Card title="Бюджет недели" icon={<Wallet size={19} color="var(--primary)" />}>
+            <BudgetView budget={sem.budget} disciplines={sem.disciplines} />
+          </Card>
+        ) : (
+          <p className="muted">Нагрузка ещё не рассчитана.</p>
+        ))}
+      {view === 'week' && (
+        <>
+          <Card
+            className="semester-week"
+            title="Типичная неделя"
+            icon={<Layers size={19} color="var(--violet)" />}
+          >
+            <SkeletonGrid slots={sem.skeleton} names={names} />
+          </Card>
+          {sem.moved.length > 0 && (
+            <details className="semester-moves">
+              <summary>Переносы из-за календаря · {sem.moved.length}</summary>
+              <Card title="Переносы" icon={<GitCompareArrows size={19} color="var(--primary)" />}>
+                <div className="stack">
+                  {sem.moved.map((m) => (
+                    <MovedRow
+                      key={m.sessionId}
+                      m={m}
+                      name={names.get(m.disciplineId) ?? ''}
+                      zone={zone}
+                    />
+                  ))}
+                </div>
+              </Card>
+            </details>
+          )}
+        </>
+      )}
+      {active && view === 'manage' && (
+        <div className="stack">
+          <Card title="Состав дисциплин" icon={<GitCompareArrows size={18} />}>
+            <ChangesPanel sem={sem} />
+          </Card>
+          <DeleteSemesterPanel sem={sem} />
+        </div>
       )}
     </div>
   );
@@ -292,7 +327,7 @@ export function NewSemesterForm({ zone, now }: { zone: string; now: number }) {
         </Field>
       </div>
       <div className="field">
-        Дисциплины семестра
+        Дисциплины семестра · выбрано {ids.length}
         <div className="grid-2" style={{ gap: 10 }}>
           {disciplines.map((d) => (
             <DisciplineCheck
@@ -360,7 +395,8 @@ function ChangesPanel({ sem }: { sem: SemesterView }) {
         />
         <select
           className="select"
-          style={{ width: 'auto', minWidth: 220 }}
+          aria-label="Дисциплина для изменения состава"
+          style={{ width: 'auto', maxWidth: '100%' }}
           value={disciplineId}
           onChange={(e) => {
             setDisciplineId(e.target.value);
@@ -390,9 +426,13 @@ function ChangesPanel({ sem }: { sem: SemesterView }) {
       </div>
       {options.length === 0 && (
         <p className="faint">
-          {type === 'add'
-            ? 'Все дисциплины уже в семестре — новую можно создать в «Дисциплинах».'
-            : 'Убирать нечего.'}
+          {type === 'add' ? (
+            <>
+              Все дисциплины уже в семестре. <a href="#disciplines">Добавить новую →</a>
+            </>
+          ) : (
+            'Убирать нечего.'
+          )}
         </p>
       )}
       {preview && (
@@ -450,6 +490,55 @@ function ChangesPanel({ sem }: { sem: SemesterView }) {
   );
 }
 
+export function DeleteSemesterPanel({ sem }: { sem: SemesterView }) {
+  const confirm = useConfirm();
+  const { run, error, busy } = useAction();
+  return (
+    <Card title="Удаление семестра" icon={<Trash2 size={19} color="var(--danger)" />}>
+      <div className="stack">
+        {sem.deletionPending && (
+          <Alert tone="warning">
+            Удаление было прервано. Часть событий могла уже удалиться из Google. Повтори удаление:
+            оставшиеся события будут убраны, затем семестр исчезнет из приложения. До этого
+            синхронизация не будет восстанавливать его события.
+          </Alert>
+        )}
+        <p className="muted">
+          Расписание, итоги занятий и прогресс этого семестра будут удалены вместе с его событиями в
+          Google Календаре. Дисциплины, источники и общие настройки сохранятся — можно будет
+          составить новый семестр. Общий опыт, звания и уже заработанные награды сохранятся.
+        </p>
+        <div>
+          <Button
+            variant="danger"
+            icon={<Trash2 size={16} />}
+            disabled={busy}
+            onClick={async () => {
+              if (
+                !(await confirm({
+                  title: 'Удалить семестр полностью?',
+                  text: `Семестр ${dateLabel(sem.startDate)} — ${dateLabel(sem.endDate)}, все его занятия, итоги и события в Google Календаре будут удалены без возможности отмены. После удаления можно составить новый семестр.`,
+                  ok: 'Удалить семестр',
+                  danger: true,
+                }))
+              )
+                return;
+              await run(() => api.del(`/api/semesters/${encodeURIComponent(sem.id)}`));
+            }}
+          >
+            {busy
+              ? 'Удаляю семестр и события…'
+              : sem.deletionPending
+                ? 'Повторить удаление семестра'
+                : 'Удалить семестр'}
+          </Button>
+        </div>
+        <ErrorText error={error} />
+      </div>
+    </Card>
+  );
+}
+
 export function SemesterScreen({ today }: { today: Today }) {
   const { data: draft, error } = useApi<SemesterView>(
     today.draftPending ? '/api/semesters/draft' : null,
@@ -464,17 +553,19 @@ export function SemesterScreen({ today }: { today: Today }) {
           icon={<Layers size={24} />}
           title="Семестр"
           subtitle={`${dateLabel(sem.startDate)} — ${dateLabel(sem.endDate)}`}
-          actions={<Badge tone="success">идёт</Badge>}
+          actions={
+            <Badge tone={sem.deletionPending ? 'warning' : 'success'}>
+              {sem.deletionPending
+                ? 'удаление не завершено'
+                : today.date < sem.startDate
+                  ? 'скоро начнётся'
+                  : today.date > sem.endDate
+                    ? 'завершён'
+                    : 'идёт'}
+            </Badge>
+          }
         />
-        <div className="stack-lg">
-          <SemesterSummary sem={sem} zone={zone} />
-          <Card
-            title="Изменения посреди семестра"
-            icon={<GitCompareArrows size={19} color="var(--violet)" />}
-          >
-            <ChangesPanel sem={sem} />
-          </Card>
-        </div>
+        <SemesterSummary key={sem.id} sem={sem} zone={zone} />
       </>
     );
   }

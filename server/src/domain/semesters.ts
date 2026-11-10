@@ -56,6 +56,7 @@ export function weekNumber(sem: SemesterRecord, instant: Instant, timezone: stri
 
 export interface SemesterView {
   id: string;
+  deletionPending: boolean;
   status: SemesterRecord['status'];
   startDate: string;
   /** Последний день семестра. */
@@ -97,6 +98,7 @@ export function semesterView(deps: Deps, sem: SemesterRecord): SemesterView {
 
   return {
     id: sem.id,
+    deletionPending: store.getMeta(`semesterDeletion:${sem.id}`) === 'pending',
     status: sem.status,
     startDate: sem.startDate,
     endDate: localDate(cal.rangeEnd - 1, settings.timezone),

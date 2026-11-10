@@ -5,9 +5,24 @@ coverage/
 
 # База и резервные копии — только на этом ПК
 data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+
+# Снимки экрана и выгрузки итогов занятий
+/artifacts/
+/exports/
+summaries.md
+summaries.json
+summaries (*).md
+summaries (*).json
 
 # Секреты Google
 .env
+.env.*
+!.env.example
+client_secret*.json
 
 # Личные данные для симулятора
 engine/sim/my-*.json

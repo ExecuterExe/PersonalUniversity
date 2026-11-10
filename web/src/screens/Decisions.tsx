@@ -22,7 +22,6 @@ import {
   Badge,
   Button,
   Card,
-  Empty,
   ErrorText,
   Loading,
   Option,
@@ -387,16 +386,11 @@ function DecisionCard({
 export function DecisionsScreen({ today }: { today: Today }) {
   const { data, error } = useApi<DecisionView[]>('/api/decisions');
   const [choices, setChoices] = useState<Record<string, number>>({});
+  const [opened, setOpened] = useState<string | null>(null);
   const [preview, setPreview] = useState<MakeupPreview | null>(null);
   const { run, error: actionError, busy } = useAction();
   const confirm = useConfirm();
-  const header = (
-    <PageHeader
-      icon={<Inbox size={24} />}
-      title="Решения"
-      subtitle="Вопросы, которые сервис не решает без тебя"
-    />
-  );
+  const header = <PageHeader icon={<Inbox size={24} />} title="Решения" />;
   if (!data) {
     return (
       <>
@@ -409,11 +403,17 @@ export function DecisionsScreen({ today }: { today: Today }) {
     return (
       <>
         {header}
-        <Card>
-          <Empty icon={<Inbox size={26} />} title="Вопросов нет">
-            Здесь появятся пропуски, конфликты с календарём, подсказки и контрольные точки.
-          </Empty>
-        </Card>
+        <section className="decisions-clear">
+          <span>
+            <Check size={24} />
+          </span>
+          <div>
+            <h2>На сегодня всё разобрано</h2>
+            <p>Открытых вопросов нет.</p>
+            <a href="#today">Перейти к занятиям →</a>
+          </div>
+        </section>
+        <ErrorText error={error} />
       </>
     );
   }
@@ -422,6 +422,7 @@ export function DecisionsScreen({ today }: { today: Today }) {
     (a, b) => (a.session?.start ?? a.createdAt) - (b.session?.start ?? b.createdAt),
   );
   const chosenMissed = data.filter((d) => d.kind === 'missed' && choices[d.id] !== undefined);
+  const active = sorted.find((d) => d.id === opened) ?? sorted[0]!;
   const allMissed = data.filter((d) => d.kind === 'missed');
   const lead = today.semester?.leadDays ?? 0;
 
@@ -445,72 +446,125 @@ export function DecisionsScreen({ today }: { today: Today }) {
   return (
     <>
       {header}
-      <div className="stack-lg">
-        {allMissed.length > 1 && (
-          <Card className="tinted">
-            <div className="row between">
-              <span>
-                Пропусков: <strong>{allMissed.length}</strong>. Отработай нужные, а остальные можно
-                оставить разом.
-              </span>
-              <Button variant="secondary" disabled={busy} onClick={() => void leaveAll()}>
-                Оставить все как есть
-              </Button>
+      <div className="decision-home">
+        <ErrorText error={error} />
+        <div className="decision-workspace">
+          <nav className="decision-queue" aria-label="Открытые вопросы">
+            <h2>
+              Требуют решения <small>{sorted.length}</small>
+            </h2>
+            <div className="decision-list">
+              {sorted.map((d) => {
+                const { icon: Icon, color } = KIND[d.kind];
+                return (
+                  <button
+                    type="button"
+                    key={d.id}
+                    aria-pressed={d.id === active.id}
+                    onClick={() => setOpened(d.id)}
+                  >
+                    <Icon size={17} color={color} />
+                    <span>
+                      <strong>{d.title}</strong>
+                      <small>
+                        {d.session ? d.session.disciplineName + ' · ' : ''}
+                        {local(d.session?.start ?? d.createdAt, today.timezone)
+                          .setLocale('ru')
+                          .toFormat('d MMM, HH:mm')}
+                      </small>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          </Card>
-        )}
-        {chosenMissed.length > 1 && (
-          <Card title="Если отработать выбранное" icon={<Scale size={18} color="var(--primary)" />}>
-            <div className="stack">
-              <div>
-                <Button
-                  variant="secondary"
-                  onClick={async () => {
-                    const result = await run(() =>
-                      api.post<MakeupPreview>('/api/decisions/makeup-preview', {
-                        choices: chosenMissed.map((d) => ({
-                          decisionId: d.id,
-                          start: choices[d.id],
-                        })),
-                      }),
-                    );
-                    if (result) setPreview(result);
+            <select
+              className="select decision-select"
+              aria-label="Выбрать вопрос"
+              value={active.id}
+              onChange={(e) => setOpened(e.target.value)}
+            >
+              {sorted.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title} ·{' '}
+                  {local(d.session?.start ?? d.createdAt, today.timezone).toFormat('dd.MM HH:mm')}
+                </option>
+              ))}
+            </select>
+          </nav>
+          <div className="decision-detail">
+            {sorted.map((d) => (
+              <div key={d.id} hidden={active.id !== d.id}>
+                <DecisionCard
+                  d={d}
+                  today={today}
+                  choice={choices[d.id]}
+                  setChoice={(start) => {
+                    setChoices((v) => ({ ...v, [d.id]: start }));
+                    setPreview(null);
                   }}
-                >
-                  Посчитать нагрузку
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="stack">
+          {allMissed.length > 1 && (
+            <Card className="tinted">
+              <div className="row between">
+                <span>
+                  Пропусков: <strong>{allMissed.length}</strong>. Отработай нужные, а остальные
+                  можно оставить разом.
+                </span>
+                <Button variant="secondary" disabled={busy} onClick={() => void leaveAll()}>
+                  Оставить все как есть
                 </Button>
               </div>
-              {preview?.weeks.map((w) => (
-                <div key={w.weekIndex} className="row between">
-                  <span>Неделя {w.weekIndex + (lead ? 0 : 1)}</span>
-                  <span className={w.overCap ? 'error-text' : 'muted'}>
-                    {formatHours(w.beforeMinutes)} → {formatHours(w.afterMinutes)} из{' '}
-                    {formatHours(w.capMinutes)}
-                    {w.overCap && <Badge tone="danger">больше лимита</Badge>}
-                  </span>
+            </Card>
+          )}
+          {chosenMissed.length > 1 && (
+            <Card
+              title="Если отработать выбранное"
+              icon={<Scale size={18} color="var(--primary)" />}
+            >
+              <div className="stack">
+                <div>
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      const result = await run(() =>
+                        api.post<MakeupPreview>('/api/decisions/makeup-preview', {
+                          choices: chosenMissed.map((d) => ({
+                            decisionId: d.id,
+                            start: choices[d.id],
+                          })),
+                        }),
+                      );
+                      if (result) setPreview(result);
+                    }}
+                  >
+                    Посчитать нагрузку
+                  </Button>
                 </div>
-              ))}
-              {preview && preview.invalid.length > 0 && (
-                <Alert tone="warning">
-                  Некоторые варианты вместе не помещаются — выбери другие.
-                </Alert>
-              )}
-            </div>
-          </Card>
-        )}
-        <ErrorText error={actionError} />
-        {sorted.map((d) => (
-          <DecisionCard
-            key={d.id}
-            d={d}
-            today={today}
-            choice={choices[d.id]}
-            setChoice={(start) => {
-              setChoices({ ...choices, [d.id]: start });
-              setPreview(null);
-            }}
-          />
-        ))}
+                {preview?.weeks.map((w) => (
+                  <div key={w.weekIndex} className="row between">
+                    <span>Неделя {w.weekIndex + (lead ? 0 : 1)}</span>
+                    <span className={w.overCap ? 'error-text' : 'muted'}>
+                      {formatHours(w.beforeMinutes)} → {formatHours(w.afterMinutes)} из{' '}
+                      {formatHours(w.capMinutes)}
+                      {w.overCap && <Badge tone="danger">больше лимита</Badge>}
+                    </span>
+                  </div>
+                ))}
+                {preview && preview.invalid.length > 0 && (
+                  <Alert tone="warning">
+                    Некоторые варианты вместе не помещаются — выбери другие.
+                  </Alert>
+                )}
+              </div>
+            </Card>
+          )}
+          <ErrorText error={actionError} />
+        </div>
       </div>
     </>
   );

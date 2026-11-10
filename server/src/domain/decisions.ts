@@ -70,6 +70,8 @@ export async function runChecks(deps: Deps): Promise<void> {
   });
 
   const plan = await planContext(deps, sem, { cachedBusy: true });
+  // Семестр могли удалить, пока ожидали занятость календаря.
+  if (!store.getSemester(sem.id)) return;
   const conflicts = detectConflicts(plan.ctx, plan.state, now).filter(
     (c) => c.sessionId !== running,
   );

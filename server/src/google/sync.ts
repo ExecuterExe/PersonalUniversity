@@ -2,6 +2,7 @@ import { checkPlacement, makeCalendar, MINUTE, type Instant, type Session } from
 import type { SemesterRecord } from '../db/store';
 import { appSettings, planContext, specOf, type Deps, type PlanContext } from '../domain/context';
 import { GoogleError, type GoogleEvent } from './api';
+import { conflict } from '../errors';
 
 export const CALENDAR_NAME = 'Мой университет';
 
@@ -320,6 +321,8 @@ async function syncOnce(deps: Deps): Promise<SyncReport | null> {
   };
   const sem = store.findSemester('active');
   const timezone = appSettings(store).timezone;
+  // После частичного удаления не возвращаем уже удалённые события при следующей синхронизации.
+  if (sem && store.getMeta(`semesterDeletion:${sem.id}`) === 'pending') return null;
 
   try {
     if (sem) {
@@ -363,6 +366,61 @@ async function syncOnce(deps: Deps): Promise<SyncReport | null> {
 export function syncGoogle(deps: Deps): Promise<SyncReport | null> {
   const state = stateOf(deps);
   const run = state.queue.then(() => syncOnce(deps));
+  state.queue = run.catch(() => undefined);
+  return run;
+}
+
+/** Удаление стоит в той же очереди, чтобы синхронизация не вернула события обратно. */
+export function deleteSemester(deps: Deps, id: string): Promise<void> {
+  const state = stateOf(deps);
+  const run = state.queue.then(async () => {
+    const { store, google } = deps;
+    const sem = store.getSemester(id);
+    // Ответ на прежнее удаление мог потеряться. Повтор подтверждает результат,
+    // не обращаясь к Google и не затрагивая новый семестр.
+    if (!sem) return;
+    let removedFromGoogle = false;
+    const account = store.getGoogleAccount();
+    const links = store.listLinks(id);
+    if (account.calendarId && (sem.status !== 'draft' || links.length > 0)) {
+      if (!google || !account.tokens || account.needsReauth) {
+        throw conflict(
+          'Чтобы удалить события семестра из Google Календаря, сначала войди в Google заново',
+        );
+      }
+      store.setMeta(`semesterDeletion:${id}`, 'pending');
+      try {
+        let events: GoogleEvent[];
+        try {
+          // Без границ дат: пользователь мог перенести событие за пределы семестра.
+          events = await google.api.listEvents(account.calendarId, null, `ouSemester=${id}`);
+        } catch (error) {
+          if (!(error instanceof GoogleError) || ![404, 410].includes(error.status ?? 0))
+            throw error;
+          events = [];
+        }
+        const eventIds = new Set([...events.map((e) => e.id), ...links.map((l) => l.eventId)]);
+        for (const eventId of eventIds) await google.api.deleteEvent(account.calendarId, eventId);
+        removedFromGoogle = true;
+      } catch (error) {
+        if (!(error instanceof GoogleError)) throw error;
+        store.updateGoogleAccount({ lastSyncError: error.message });
+        throw conflict(
+          `Удаление семестра не завершено: ${error.message}. Повтори удаление после восстановления доступа к Google`,
+        );
+      }
+    } else if (links.length > 0) {
+      throw conflict(
+        'Не найден связанный Google Календарь — восстанови подключение перед удалением семестра',
+      );
+    }
+    store.transaction(() => {
+      store.deleteSemester(id);
+      if (removedFromGoogle)
+        store.updateGoogleAccount({ lastSyncAt: deps.now(), lastSyncError: null });
+    });
+    resetCalendarSync(deps);
+  });
   state.queue = run.catch(() => undefined);
   return run;
 }

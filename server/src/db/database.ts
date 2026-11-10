@@ -146,6 +146,38 @@ const MIGRATIONS: string[] = [
     events TEXT NOT NULL
   );
   `,
+  `
+  -- Удалённая карточка скрыта из библиотеки; имя остаётся для истории занятий.
+  ALTER TABLE disciplines ADD COLUMN deleted_at INTEGER;
+  `,
+  `
+  ALTER TABLE summaries ADD COLUMN next_question TEXT NOT NULL DEFAULT '';
+  CREATE TABLE reward_options (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1
+  );
+  INSERT INTO reward_options (id, title) VALUES
+    ('anime', 'Посмотреть серию аниме'),
+    ('game', 'Поиграть 30 минут'),
+    ('break', 'Перерыв с любимым напитком');
+  -- Общий опыт и заработанные награды сохраняются между семестрами.
+  CREATE TABLE study_awards (
+    id TEXT PRIMARY KEY, semester_id TEXT NOT NULL, session_id TEXT NOT NULL,
+    discipline_name TEXT NOT NULL, xp INTEGER NOT NULL CHECK (xp > 0),
+    level_before INTEGER NOT NULL, level_after INTEGER NOT NULL,
+    offers TEXT NOT NULL, chosen_index INTEGER, chosen_at INTEGER,
+    used_at INTEGER, acknowledged_at INTEGER, created_at INTEGER NOT NULL,
+    UNIQUE (semester_id, session_id)
+  );
+  `,
+  `
+  ALTER TABLE study_awards ADD COLUMN quality_id INTEGER;
+  ALTER TABLE study_awards ADD COLUMN quality_outcome TEXT NOT NULL DEFAULT 'legacy';
+  CREATE TABLE quality_collection (
+    word_id INTEGER PRIMARY KEY CHECK (word_id >= 0 AND word_id < 500),
+    award_id TEXT NOT NULL UNIQUE,
+    found_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

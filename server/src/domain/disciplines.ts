@@ -78,6 +78,38 @@ export function archiveDiscipline(deps: Deps, id: string): DisciplineRecord {
   return next;
 }
 
+export function disciplineDeletion(
+  deps: Deps,
+  id: string,
+): { allowed: boolean; reason: string | null } {
+  for (const status of ['active', 'draft'] as const) {
+    const sem = deps.store.findSemester(status);
+    if (
+      sem &&
+      (sem.disciplineIds.includes(id) ||
+        sem.frequencies[id] !== undefined ||
+        deps.store.loadSessions(sem.id).some((s) => s.disciplineId === id))
+    ) {
+      return {
+        allowed: false,
+        reason:
+          status === 'active'
+            ? 'Дисциплина связана с текущим семестром. Удалить её можно после завершения или удаления этого семестра. Пока можно убрать её из расписания через вкладку «Семестр».'
+            : 'Дисциплина включена в черновик семестра. Сначала удали или пересоздай черновик без этой дисциплины.',
+      };
+    }
+  }
+  return { allowed: true, reason: null };
+}
+
+/** Удаление карточки не стирает записи о проведённых занятиях. */
+export function deleteDiscipline(deps: Deps, id: string): void {
+  getDiscipline(deps, id);
+  const deletion = disciplineDeletion(deps, id);
+  if (!deletion.allowed) throw conflict(deletion.reason!);
+  deps.store.deleteDiscipline(id, deps.now());
+}
+
 export const sourceInput = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('link'),

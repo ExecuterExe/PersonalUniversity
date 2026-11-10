@@ -107,9 +107,9 @@ describe('пауза, которую ставит сервис', () => {
     expect(early.pausedAt).toBe(T0);
   });
 
-  it('знает, когда закончится запланированное время с учётом пауз', () => {
+  it('паузы не сдвигают конец запланированного времени', () => {
     let t = startTimer('s1', 90, T0);
     t = resumeTimer(pauseTimer(t, at(10)), at(25));
-    expect(plannedEndAt(t)).toBe(at(105));
+    expect(plannedEndAt(t)).toBe(at(90));
   });
 });

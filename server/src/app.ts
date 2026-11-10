@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { checkGoogleConfig, type Config } from './config';
 import type { Deps } from './domain/context';
 import { AppError } from './errors';
+import { GoogleError } from './google/api';
 import { registerGoogleRoutes } from './google/routes';
 import { registerRoutes } from './routes';
 import { registerSystemRoutes } from './system/routes';
@@ -21,6 +22,10 @@ function isOwnOrigin(origin: string): boolean {
 
 export function buildApp(config: Config, deps: Deps, options: { webDir?: string } = {}) {
   const app = Fastify();
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (req.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
+    return payload;
+  });
 
   // Сервис работает в фоне постоянно, поэтому чужая открытая страница не должна
   // ничего менять через него: изменения принимаются только со страниц самого сервиса.
@@ -35,6 +40,9 @@ export function buildApp(config: Config, deps: Deps, options: { webDir?: string 
   app.setErrorHandler((error: FastifyError | AppError | ZodError, request, reply) => {
     if (error instanceof AppError) {
       return reply.status(error.status).send({ error: error.message, details: error.details });
+    }
+    if (error instanceof GoogleError) {
+      return reply.status(error.kind === 'auth' ? 401 : 503).send({ error: error.message });
     }
     if (error instanceof ZodError) {
       return reply.status(400).send({
@@ -66,6 +74,8 @@ export function buildApp(config: Config, deps: Deps, options: { webDir?: string 
       req.method !== 'GET' &&
       req.url.startsWith('/api/') &&
       !req.url.startsWith('/api/google') &&
+      !req.url.startsWith('/api/progress') &&
+      req.url.split('?')[0] !== '/api/practice/prompt' &&
       reply.statusCode < 400
     ) {
       deps.afterChange();

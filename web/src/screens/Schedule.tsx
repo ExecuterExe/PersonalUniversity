@@ -1,21 +1,24 @@
+import { plural, SESSION_FORMS } from '@ou/engine';
 import {
   CalendarClock,
   CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
+  List,
   MoveRight,
   SkipForward,
   X,
 } from 'lucide-react';
 import type { DateTime } from 'luxon';
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api, ApiError, errorText } from '../api';
 import { useAccent, useColor } from '../colors';
 import { useConfirm } from '../confirm';
 import {
   day,
   formatClock,
+  formatDuration,
   fromInput,
   local,
   ORIGIN,
@@ -80,6 +83,7 @@ function MoveForm({
       <input
         className="input"
         type="datetime-local"
+        aria-label="Новое время занятия"
         value={value}
         onChange={(e) => {
           setValue(e.target.value);
@@ -125,6 +129,12 @@ function SessionPanel({
   const confirm = useConfirm();
   const color = useColor(s.disciplineId);
   const [moving, setMoving] = useState(pending !== undefined);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = dialog.current;
+    el?.showModal();
+    return () => el?.close();
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const zone = today.timezone;
   const future = s.status === 'planned' && s.start > today.now;
@@ -148,7 +158,15 @@ function SessionPanel({
   };
 
   return (
-    <div className="panel">
+    <dialog
+      ref={dialog}
+      className="schedule-detail"
+      aria-label={s.disciplineName}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+    >
       <Card
         title={s.disciplineName}
         icon={<span className="dot" style={{ background: color.accent, width: 12, height: 12 }} />}
@@ -196,7 +214,7 @@ function SessionPanel({
           <ErrorText error={error} />
         </div>
       </Card>
-    </div>
+    </dialog>
   );
 }
 
@@ -268,22 +286,77 @@ interface Drag {
 }
 
 export function ScheduleScreen({ today }: { today: Today }) {
+  const [offset, setOffset] = useState(0);
+  const [view, setView] = useState<'day' | 'grid'>('day');
+  const monday = local(weekStart(today.now, today.timezone), today.timezone).plus({
+    weeks: offset,
+  });
+  return (
+    <ScheduleWeek
+      key={`${today.semester?.id}-${monday.toMillis()}`}
+      today={today}
+      monday={monday}
+      offset={offset}
+      setOffset={setOffset}
+      view={view}
+      setView={setView}
+    />
+  );
+}
+
+function AgendaRow({ s, zone, select }: { s: SessionView; zone: string; select: () => void }) {
+  const accent = useAccent(s.disciplineId);
+  return (
+    <button type="button" className="agenda-item" style={accent} onClick={select}>
+      <span className="agenda-time">
+        <strong>{time(s.start, zone)}</strong>
+        <small>{time(s.end, zone)}</small>
+      </span>
+      <span className="agenda-subject">
+        <strong>{s.disciplineName}</strong>
+        <small>
+          {formatDuration(Math.round((s.end - s.start) / 60000))} ·{' '}
+          {s.running ? 'Идёт сейчас' : STATUS[s.status]}
+        </small>
+      </span>
+      <ChevronRight size={17} aria-hidden="true" />
+    </button>
+  );
+}
+
+function ScheduleWeek({
+  today,
+  monday,
+  offset,
+  setOffset,
+  view,
+  setView,
+}: {
+  today: Today;
+  monday: DateTime;
+  offset: number;
+  setOffset: (n: number) => void;
+  view: 'day' | 'grid';
+  setView: (v: 'day' | 'grid') => void;
+}) {
   const zone = today.timezone;
   const { refresh } = useRefresh();
-  const [offset, setOffset] = useState(0);
+  const currentDay = local(today.now, zone).weekday - 1;
+  const [dayIndex, setDayIndex] = useState(offset === 0 ? currentDay : 0);
   const [selected, setSelected] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingMove | undefined>(undefined);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [dragError, setDragError] = useState<string | null>(null);
   const columns = useRef<(HTMLDivElement | null)[]>([]);
   const suppressClick = useRef(false);
-  const monday = local(weekStart(today.now, zone), zone).plus({ weeks: offset });
   const from = monday.toMillis();
   const to = monday.plus({ weeks: 1 }).toMillis();
   const { data, error } = useApi<SessionView[]>(
     today.semester ? `/api/schedule?from=${from}&to=${to}` : null,
   );
-  const { data: settings } = useApi<AppSettings>('/api/settings');
+  const { data: settings, error: settingsError } = useApi<AppSettings>(
+    view === 'grid' && today.semester ? '/api/settings' : null,
+  );
 
   const select = (id: string | null) => {
     setSelected(id);
@@ -304,8 +377,16 @@ export function ScheduleScreen({ today }: { today: Today }) {
               aria-label="Прошлая неделя"
               onClick={() => setOffset(offset - 1)}
             />
-            <Button variant="secondary" onClick={() => setOffset(0)} disabled={offset === 0}>
-              Эта неделя
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setOffset(0);
+                setDayIndex(currentDay);
+                select(null);
+              }}
+              disabled={offset === 0 && (view === 'grid' || dayIndex === currentDay)}
+            >
+              Сегодня
             </Button>
             <Button
               variant="secondary"
@@ -331,7 +412,7 @@ export function ScheduleScreen({ today }: { today: Today }) {
       </>
     );
   }
-  if (!data || !settings) {
+  if (!data) {
     return (
       <>
         {header}
@@ -345,9 +426,10 @@ export function ScheduleScreen({ today }: { today: Today }) {
     return dt.hour * 60 + dt.minute;
   };
   const marks = [
-    ...settings.studyWindows.flatMap((w) => [w.start, w.end]),
+    ...(settings?.studyWindows ?? []).flatMap((w) => [w.start, w.end]),
     ...data.flatMap((s) => [minuteOf(s.start), minuteOf(s.start) + (s.end - s.start) / 60_000]),
   ];
+  if (!marks.length) marks.push(9 * 60, 17 * 60);
   const startHour = Math.max(0, Math.floor(Math.min(...marks) / 60) - 1);
   const endHour = Math.min(24, Math.ceil(Math.max(...marks) / 60) + 1);
   const height = (endHour - startHour) * 60 * PX_PER_MIN;
@@ -356,6 +438,13 @@ export function ScheduleScreen({ today }: { today: Today }) {
   const todayKey = local(today.now, zone).toISODate();
   const nowMinute = minuteOf(today.now);
   const selectedSession = data.find((s) => s.id === selected);
+  const visibleDay = days[dayIndex]!;
+  const daily = days.map((d) =>
+    data.filter((s) => local(s.start, zone).hasSame(d, 'day')).sort((a, b) => a.start - b.start),
+  );
+  const lessons = daily[dayIndex]!;
+  const weekSessions = data.filter((s) => s.status !== 'skipped' && s.status !== 'cancelled');
+  const weekMinutes = Math.round(weekSessions.reduce((sum, s) => sum + s.end - s.start, 0) / 60000);
   const dragged = drag ? data.find((s) => s.id === drag.id) : undefined;
   const at = (d: DateTime, minute: number) =>
     d.set({ hour: Math.floor(minute / 60), minute: minute % 60 }).toMillis();
@@ -390,12 +479,12 @@ export function ScheduleScreen({ today }: { today: Today }) {
       setDrag(current);
     };
 
-    const onUp = () => {
+    const onUp = (event: PointerEvent) => {
       target.removeEventListener('pointermove', onMove);
       target.removeEventListener('pointerup', onUp);
       target.removeEventListener('pointercancel', onUp);
       setDrag(null);
-      if (!current.moved) return;
+      if (!current.moved || event.type === 'pointercancel') return;
       // Щелчок, который браузер пришлёт следом за перетаскиванием, — не выбор занятия.
       // Флаг сбрасывается при следующем нажатии на любое занятие.
       suppressClick.current = true;
@@ -427,90 +516,149 @@ export function ScheduleScreen({ today }: { today: Today }) {
           <Alert tone="danger">{dragError}</Alert>
         </div>
       )}
-      <div className="week-grid">
-        <div className="day-head" style={{ borderLeft: 'none' }} />
-        {days.map((d) => (
-          <div
-            key={d.toISODate()}
-            className={`day-head ${d.toISODate() === todayKey ? 'today' : ''}`}
-          >
-            {d.setLocale('ru').toFormat('ccc')}
-            <strong>{d.day}</strong>
-          </div>
-        ))}
-        <div className="hours" style={{ height }}>
-          {/* Подписи — только внутренним линиям: у краёв сетки они обрезались бы. */}
-          {Array.from({ length: endHour - startHour - 1 }, (_, i) => (
-            <span key={i} className="hour" style={{ top: (i + 1) * 60 * PX_PER_MIN }}>
-              {String(startHour + i + 1).padStart(2, '0')}:00
-            </span>
-          ))}
+      <div className="schedule-toolbar">
+        <div className="stats-nav" role="group" aria-label="Вид расписания">
+          <button type="button" aria-pressed={view === 'day'} onClick={() => setView('day')}>
+            <List size={15} />
+            По дням
+          </button>
+          <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
+            <CalendarDays size={15} />
+            Сетка недели
+          </button>
         </div>
-        {days.map((d, dayIndex) => {
-          const key = d.toISODate();
-          const excluded = settings.excludedWeekdays.includes(d.weekday as Weekday);
-          return (
-            <div
-              key={key}
-              ref={(el) => {
-                columns.current[dayIndex] = el;
-              }}
-              className={`day-col ${key === todayKey ? 'today' : ''}`}
-              style={{ height, backgroundSize: `100% ${60 * PX_PER_MIN}px` }}
-            >
-              {!excluded &&
-                settings.studyWindows.map((w, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      position: 'absolute',
-                      left: 0,
-                      right: 0,
-                      top: y(w.start),
-                      height: (w.end - w.start) * PX_PER_MIN,
-                      background: 'rgba(79, 95, 232, 0.05)',
-                    }}
-                  />
-                ))}
-              {key === todayKey && nowMinute >= startHour * 60 && nowMinute <= endHour * 60 && (
-                <div className="now-line" style={{ top: y(nowMinute) }} />
-              )}
-              {data
-                .filter((s) => local(s.start, zone).toISODate() === key)
-                .map((s) => (
-                  <Block
-                    key={s.id}
-                    s={s}
-                    top={y(minuteOf(s.start))}
-                    height={((s.end - s.start) / 60_000) * PX_PER_MIN - 3}
-                    zone={zone}
-                    selected={s.id === selected}
-                    draggable={s.status === 'planned' && s.start > today.now}
-                    dragging={drag?.id === s.id && drag.moved}
-                    onPointerDown={(e) => {
-                      suppressClick.current = false;
-                      if (s.status === 'planned' && s.start > today.now) startDrag(s, dayIndex, e);
-                    }}
-                    onSelect={() => {
-                      if (suppressClick.current) {
-                        suppressClick.current = false;
-                        return;
-                      }
-                      select(s.id === selected ? null : s.id);
-                    }}
-                  />
-                ))}
-              {drag?.moved && dragged && drag.dayIndex === dayIndex && (
-                <Ghost s={dragged} top={y(drag.minute)} minute={drag.minute} />
-              )}
-            </div>
-          );
-        })}
+        <span className="muted small">
+          {weekSessions.length} {plural(weekSessions.length, SESSION_FORMS)} ·{' '}
+          {formatDuration(weekMinutes)} за неделю
+        </span>
       </div>
-      <p className="faint" style={{ marginTop: 10 }}>
-        Голубым подсвечены окна для учёбы. Будущее занятие можно перетащить на другое время или
-        нажать на него, чтобы перенести или пропустить.
-      </p>
+      <ErrorText error={error} />
+      {view === 'day' ? (
+        <section className="agenda-card">
+          <div className="agenda-days" role="group" aria-label="Дни недели">
+            {days.map((d, i) => (
+              <button
+                type="button"
+                key={d.toMillis()}
+                aria-pressed={dayIndex === i}
+                aria-current={d.toISODate() === todayKey ? 'date' : undefined}
+                aria-label={`${d.setLocale('ru').toFormat('cccc, d MMMM')}, ${daily[i]!.length} ${plural(daily[i]!.length, SESSION_FORMS)}`}
+                onClick={() => setDayIndex(i)}
+              >
+                <span>{d.setLocale('ru').toFormat('ccc')}</span>
+                <strong>{d.day}</strong>
+                <i aria-hidden="true" className={daily[i]!.length ? 'has-lessons' : ''} />
+              </button>
+            ))}
+          </div>
+          <div className="agenda-body">
+            <h2>
+              {visibleDay.toISODate() === todayKey
+                ? 'Сегодня'
+                : visibleDay.setLocale('ru').toFormat('cccc')}
+              , {visibleDay.setLocale('ru').toFormat('d MMMM')}
+            </h2>
+            {lessons.length ? (
+              <div className="agenda-list">
+                {lessons.map((s) => (
+                  <AgendaRow key={s.id} s={s} zone={zone} select={() => select(s.id)} />
+                ))}
+              </div>
+            ) : (
+              <p className="agenda-empty">На этот день занятий нет.</p>
+            )}
+          </div>
+        </section>
+      ) : !settings ? (
+        <Loading error={settingsError} height={240} />
+      ) : (
+        <>
+          <div className="week-grid">
+            <div className="day-head" style={{ borderLeft: 'none' }} />
+            {days.map((d) => (
+              <div
+                key={d.toISODate()}
+                className={`day-head ${d.toISODate() === todayKey ? 'today' : ''}`}
+              >
+                {d.setLocale('ru').toFormat('ccc')}
+                <strong>{d.day}</strong>
+              </div>
+            ))}
+            <div className="hours" style={{ height }}>
+              {/* Подписи — только внутренним линиям: у краёв сетки они обрезались бы. */}
+              {Array.from({ length: endHour - startHour - 1 }, (_, i) => (
+                <span key={i} className="hour" style={{ top: (i + 1) * 60 * PX_PER_MIN }}>
+                  {String(startHour + i + 1).padStart(2, '0')}:00
+                </span>
+              ))}
+            </div>
+            {days.map((d, dayIndex) => {
+              const key = d.toISODate();
+              const excluded = settings.excludedWeekdays.includes(d.weekday as Weekday);
+              return (
+                <div
+                  key={key}
+                  ref={(el) => {
+                    columns.current[dayIndex] = el;
+                  }}
+                  className={`day-col ${key === todayKey ? 'today' : ''}`}
+                  style={{ height, backgroundSize: `100% ${60 * PX_PER_MIN}px` }}
+                >
+                  {!excluded &&
+                    settings.studyWindows.map((w, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          right: 0,
+                          top: y(w.start),
+                          height: (w.end - w.start) * PX_PER_MIN,
+                          background: 'rgba(79, 95, 232, 0.05)',
+                        }}
+                      />
+                    ))}
+                  {key === todayKey && nowMinute >= startHour * 60 && nowMinute <= endHour * 60 && (
+                    <div className="now-line" style={{ top: y(nowMinute) }} />
+                  )}
+                  {data
+                    .filter((s) => local(s.start, zone).toISODate() === key)
+                    .map((s) => (
+                      <Block
+                        key={s.id}
+                        s={s}
+                        top={y(minuteOf(s.start))}
+                        height={((s.end - s.start) / 60_000) * PX_PER_MIN - 3}
+                        zone={zone}
+                        selected={s.id === selected}
+                        draggable={s.status === 'planned' && s.start > today.now}
+                        dragging={drag?.id === s.id && drag.moved}
+                        onPointerDown={(e) => {
+                          suppressClick.current = false;
+                          if (s.status === 'planned' && s.start > today.now)
+                            startDrag(s, dayIndex, e);
+                        }}
+                        onSelect={() => {
+                          if (suppressClick.current) {
+                            suppressClick.current = false;
+                            return;
+                          }
+                          select(s.id === selected ? null : s.id);
+                        }}
+                      />
+                    ))}
+                  {drag?.moved && dragged && drag.dayIndex === dayIndex && (
+                    <Ghost s={dragged} top={y(drag.minute)} minute={drag.minute} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="faint" style={{ marginTop: 10 }}>
+            Будущие занятия можно переносить перетаскиванием.
+          </p>
+        </>
+      )}
       {selectedSession && (
         <SessionPanel
           key={`${selectedSession.id}-${pending?.start ?? ''}`}

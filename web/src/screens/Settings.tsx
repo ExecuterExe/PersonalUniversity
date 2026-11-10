@@ -22,7 +22,8 @@ import { useConfirm } from '../confirm';
 import { WeekdayPicker, WindowsEditor } from '../components';
 import { inputToMinutes, minutesToInput, WEEKDAYS } from '../format';
 import { useAction, useApi } from '../hooks';
-import type { AppSettings, GoogleCalendar, GoogleStatus, ShortcutsStatus } from '../types';
+import type { AppSettings, GoogleCalendar, GoogleStatus, ShortcutsStatus, Today } from '../types';
+import { DeleteSemesterPanel } from './Semester';
 import { Alert, Badge, Button, Card, ErrorText, Field, Loading, PageHeader } from '../ui';
 
 const hours = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
@@ -64,13 +65,21 @@ function Group({
 }
 
 /** Время для учёбы, неудобное время, лимиты, Помодоро. */
-export function SettingsForm({ onSaved }: { onSaved?: () => void }) {
+type SettingsSection = 'Расписание' | 'Лимиты' | 'Помодоро' | 'Календарь' | 'Приложение';
+type EditorProps = { onSaved?: () => void; section?: SettingsSection };
+export function SettingsForm({ onSaved, section }: EditorProps) {
   const { data, error } = useApi<AppSettings>('/api/settings');
   if (!data) return <Loading error={error} height={360} />;
-  return <SettingsEditor initial={data} {...(onSaved ? { onSaved } : {})} />;
+  return (
+    <SettingsEditor
+      initial={data}
+      {...(section ? { section } : {})}
+      {...(onSaved ? { onSaved } : {})}
+    />
+  );
 }
 
-function SettingsEditor({ initial, onSaved }: { initial: AppSettings; onSaved?: () => void }) {
+function SettingsEditor({ initial, onSaved, section }: { initial: AppSettings } & EditorProps) {
   const [form, setForm] = useState(initial);
   const { run, error: saveError, busy } = useAction();
   const [saved, setSaved] = useState(false);
@@ -93,184 +102,187 @@ function SettingsEditor({ initial, onSaved }: { initial: AppSettings; onSaved?: 
 
   return (
     <div className="stack">
-      <Group
-        icon={Clock4}
-        title="Когда удобно учиться"
-        hint="Окна, внутри которых ставятся занятия"
-      >
-        <WindowsEditor
-          value={form.studyWindows}
-          onChange={(studyWindows) => set({ studyWindows })}
-        />
-      </Group>
+      <div hidden={!!section && section !== 'Расписание'}>
+        <Group
+          icon={Clock4}
+          title="Когда удобно учиться"
+          hint="Окна, внутри которых ставятся занятия"
+        >
+          <WindowsEditor
+            value={form.studyWindows}
+            onChange={(studyWindows) => set({ studyWindows })}
+          />
+        </Group>
 
-      <Group
-        icon={Ban}
-        title="Когда неудобно"
-        hint="Сюда сервис ничего не поставит и не предложит даже в компромиссах. Например, пары."
-      >
-        {form.inconvenient.map((item, i) => (
-          <div
-            className="card flat stack"
-            style={{ padding: 14, background: 'var(--surface-2)' }}
-            key={i}
-          >
-            <div className="row">
-              <input
-                className="input"
-                style={{ flex: 1, minWidth: 160 }}
-                placeholder="Что это — например, «Пары»"
-                value={item.label}
-                onChange={(e) => setItem(i, { label: e.target.value })}
-              />
-              <input
-                className="input time"
-                type="time"
-                value={minutesToInput(item.start)}
-                onChange={(e) => setItem(i, { start: inputToMinutes(e.target.value) })}
-              />
-              <span className="muted">—</span>
-              <input
-                className="input time"
-                type="time"
-                value={minutesToInput(item.end)}
-                onChange={(e) => setItem(i, { end: inputToMinutes(e.target.value) || 24 * 60 })}
-              />
-              <Button
-                variant="ghost"
-                icon={<Trash2 size={16} />}
-                aria-label="Убрать"
-                onClick={() => set({ inconvenient: form.inconvenient.filter((_, j) => j !== i) })}
+        <Group
+          icon={Ban}
+          title="Когда неудобно"
+          hint="Сюда сервис ничего не поставит и не предложит даже в компромиссах. Например, пары."
+        >
+          {form.inconvenient.map((item, i) => (
+            <div
+              className="card flat stack"
+              style={{ padding: 14, background: 'var(--surface-2)' }}
+              key={i}
+            >
+              <div className="row">
+                <input
+                  className="input"
+                  style={{ flex: 1, minWidth: 160 }}
+                  placeholder="Что это — например, «Пары»"
+                  value={item.label}
+                  onChange={(e) => setItem(i, { label: e.target.value })}
+                />
+                <input
+                  className="input time"
+                  type="time"
+                  value={minutesToInput(item.start)}
+                  onChange={(e) => setItem(i, { start: inputToMinutes(e.target.value) })}
+                />
+                <span className="muted">—</span>
+                <input
+                  className="input time"
+                  type="time"
+                  value={minutesToInput(item.end)}
+                  onChange={(e) => setItem(i, { end: inputToMinutes(e.target.value) || 24 * 60 })}
+                />
+                <Button
+                  variant="ghost"
+                  icon={<Trash2 size={16} />}
+                  aria-label="Убрать"
+                  onClick={() => set({ inconvenient: form.inconvenient.filter((_, j) => j !== i) })}
+                />
+              </div>
+              <WeekdayPicker
+                value={item.weekdays}
+                onChange={(weekdays) => setItem(i, { weekdays })}
               />
             </div>
-            <WeekdayPicker
-              value={item.weekdays}
-              onChange={(weekdays) => setItem(i, { weekdays })}
-            />
+          ))}
+          <div>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Plus size={15} />}
+              onClick={() =>
+                set({
+                  inconvenient: [
+                    ...form.inconvenient,
+                    { start: 8 * 60, end: 10 * 60, weekdays: [...WEEKDAYS], label: '' },
+                  ],
+                })
+              }
+            >
+              Добавить неудобное время
+            </Button>
           </div>
-        ))}
-        <div>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<Plus size={15} />}
-            onClick={() =>
-              set({
-                inconvenient: [
-                  ...form.inconvenient,
-                  { start: 8 * 60, end: 10 * 60, weekdays: [...WEEKDAYS], label: '' },
-                ],
-              })
-            }
-          >
-            Добавить неудобное время
-          </Button>
-        </div>
-      </Group>
+        </Group>
 
-      <Group icon={CalendarDays} title="Дни без учёбы" hint="В эти дни занятий не будет совсем">
-        <WeekdayPicker
-          value={form.excludedWeekdays}
-          onChange={(excludedWeekdays) => set({ excludedWeekdays })}
-        />
-      </Group>
-
-      <Group icon={Gauge} title="Буфер и лимиты">
-        <div className="grid-3" style={{ gap: 14 }}>
-          <Field label="Буфер до и после событий" hint="минут">
-            <input
-              className="input"
-              type="number"
-              min={0}
-              max={120}
-              value={form.bufferMinutes}
-              onChange={(e) => set({ bufferMinutes: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Не больше в день" hint="часов">
-            <input
-              className="input"
-              type="number"
-              step={0.5}
-              min={0.5}
-              value={hours(form.maxDailyMinutes)}
-              onChange={(e) => set({ maxDailyMinutes: Math.round(Number(e.target.value) * 60) })}
-            />
-          </Field>
-          <Field label="Не больше в неделю" hint="часов">
-            <input
-              className="input"
-              type="number"
-              step={0.5}
-              min={0.5}
-              value={hours(form.maxWeeklyMinutes)}
-              onChange={(e) => set({ maxWeeklyMinutes: Math.round(Number(e.target.value) * 60) })}
-            />
-          </Field>
-          <Field label="Занятий в день" hint="не больше">
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={4}
-              value={form.maxSessionsPerDay}
-              onChange={(e) => set({ maxSessionsPerDay: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Семестр по умолчанию" hint="недель">
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={52}
-              value={form.defaultSemesterWeeks}
-              onChange={(e) => set({ defaultSemesterWeeks: Number(e.target.value) })}
-            />
-          </Field>
-        </div>
-      </Group>
-
-      <Group icon={Timer} title="Помодоро" hint="Фокус и перерывы во время занятия">
-        <div className="grid-4" style={{ gap: 14 }}>
-          <Field label="Фокус" hint="минут">
-            <input
-              className="input"
-              type="number"
-              min={5}
-              value={form.pomodoro.focusMinutes}
-              onChange={(e) => setPomodoro({ focusMinutes: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Перерыв" hint="минут">
-            <input
-              className="input"
-              type="number"
-              min={1}
-              value={form.pomodoro.breakMinutes}
-              onChange={(e) => setPomodoro({ breakMinutes: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Длинный перерыв" hint="минут">
-            <input
-              className="input"
-              type="number"
-              min={1}
-              value={form.pomodoro.longBreakMinutes}
-              onChange={(e) => setPomodoro({ longBreakMinutes: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Длинный — после" hint="циклов">
-            <input
-              className="input"
-              type="number"
-              min={1}
-              value={form.pomodoro.cyclesBeforeLongBreak}
-              onChange={(e) => setPomodoro({ cyclesBeforeLongBreak: Number(e.target.value) })}
-            />
-          </Field>
-        </div>
-      </Group>
-
+        <Group icon={CalendarDays} title="Дни без учёбы" hint="В эти дни занятий не будет совсем">
+          <WeekdayPicker
+            value={form.excludedWeekdays}
+            onChange={(excludedWeekdays) => set({ excludedWeekdays })}
+          />
+        </Group>
+      </div>
+      <div hidden={!!section && section !== 'Лимиты'}>
+        <Group icon={Gauge} title="Буфер и лимиты">
+          <div className="grid-3" style={{ gap: 14 }}>
+            <Field label="Буфер до и после событий" hint="минут">
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={120}
+                value={form.bufferMinutes}
+                onChange={(e) => set({ bufferMinutes: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Не больше в день" hint="часов">
+              <input
+                className="input"
+                type="number"
+                step={0.5}
+                min={0.5}
+                value={hours(form.maxDailyMinutes)}
+                onChange={(e) => set({ maxDailyMinutes: Math.round(Number(e.target.value) * 60) })}
+              />
+            </Field>
+            <Field label="Не больше в неделю" hint="часов">
+              <input
+                className="input"
+                type="number"
+                step={0.5}
+                min={0.5}
+                value={hours(form.maxWeeklyMinutes)}
+                onChange={(e) => set({ maxWeeklyMinutes: Math.round(Number(e.target.value) * 60) })}
+              />
+            </Field>
+            <Field label="Занятий в день" hint="не больше">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={4}
+                value={form.maxSessionsPerDay}
+                onChange={(e) => set({ maxSessionsPerDay: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Семестр по умолчанию" hint="недель">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={52}
+                value={form.defaultSemesterWeeks}
+                onChange={(e) => set({ defaultSemesterWeeks: Number(e.target.value) })}
+              />
+            </Field>
+          </div>
+        </Group>
+      </div>
+      <div hidden={!!section && section !== 'Помодоро'}>
+        <Group icon={Timer} title="Помодоро" hint="Фокус и перерывы во время занятия">
+          <div className="grid-4" style={{ gap: 14 }}>
+            <Field label="Фокус" hint="минут">
+              <input
+                className="input"
+                type="number"
+                min={5}
+                value={form.pomodoro.focusMinutes}
+                onChange={(e) => setPomodoro({ focusMinutes: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Перерыв" hint="минут">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                value={form.pomodoro.breakMinutes}
+                onChange={(e) => setPomodoro({ breakMinutes: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Длинный перерыв" hint="минут">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                value={form.pomodoro.longBreakMinutes}
+                onChange={(e) => setPomodoro({ longBreakMinutes: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Длинный — после" hint="циклов">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                value={form.pomodoro.cyclesBeforeLongBreak}
+                onChange={(e) => setPomodoro({ cyclesBeforeLongBreak: Number(e.target.value) })}
+              />
+            </Field>
+          </div>
+        </Group>
+      </div>
       <div className="save-bar">
         <Button icon={<Save size={16} />} onClick={() => void save()} disabled={busy}>
           Сохранить настройки
@@ -485,34 +497,60 @@ function LaunchPanel() {
 }
 
 export function SettingsScreen() {
+  const [section, setSection] = useState<SettingsSection>('Расписание');
+  const { data: today } = useApi<Today>('/api/today');
   return (
     <>
-      <PageHeader
-        icon={<SettingsIcon size={24} />}
-        title="Настройки"
-        subtitle="Время, ограничения, Помодоро и календарь"
-      />
-      <div className="stack-lg">
-        <Card>
-          <SettingsForm />
-        </Card>
-        <Card title="Google Календарь" icon={<CalendarDays size={19} color="var(--primary)" />}>
-          <GooglePanel />
-        </Card>
-        <Card title="Запуск" icon={<Power size={19} color="var(--primary)" />}>
-          <LaunchPanel />
-        </Card>
-        <Card title="Итоги занятий" icon={<Download size={19} color="var(--violet)" />}>
-          <div className="row">
-            <a className="btn secondary" href="/api/export/summaries">
-              <Download size={16} /> Скачать в Markdown
-            </a>
-            <a className="btn ghost" href="/api/export/summaries?format=json">
-              JSON
-            </a>
-            <span className="faint">Все итоги и «с чего продолжить» по каждому занятию.</span>
+      <PageHeader icon={<SettingsIcon size={24} />} title="Настройки" />
+      <div className="preferences-home">
+        <div className="stats-nav library-nav" role="group" aria-label="Раздел настроек">
+          {(['Расписание', 'Лимиты', 'Помодоро', 'Календарь', 'Приложение'] as const).map(
+            (name) => (
+              <button
+                key={name}
+                type="button"
+                aria-pressed={name === section}
+                onClick={() => setSection(name)}
+              >
+                {name}
+              </button>
+            ),
+          )}
+        </div>
+        <div hidden={section === 'Календарь' || section === 'Приложение'}>
+          <Card>
+            <SettingsForm section={section} />
+          </Card>
+        </div>
+        {section === 'Календарь' && (
+          <Card title="Google Календарь" icon={<CalendarDays size={19} color="var(--primary)" />}>
+            <GooglePanel />
+          </Card>
+        )}
+        {section === 'Приложение' && (
+          <div className="stack">
+            <Card title="Запуск" icon={<Power size={19} color="var(--primary)" />}>
+              <LaunchPanel />
+            </Card>
+            <Card title="Итоги занятий" icon={<Download size={19} color="var(--violet)" />}>
+              <div className="row">
+                <a className="btn secondary" href="/api/export/summaries">
+                  <Download size={16} /> Скачать в Markdown
+                </a>
+                <a className="btn ghost" href="/api/export/summaries?format=json">
+                  JSON
+                </a>
+                <span className="faint">Все итоги и «с чего продолжить» по каждому занятию.</span>
+              </div>
+            </Card>
+            {today?.semester && (
+              <details className="semester-moves">
+                <summary>Удаление семестра</summary>
+                <DeleteSemesterPanel sem={today.semester} />
+              </details>
+            )}
           </div>
-        </Card>
+        )}
       </div>
     </>
   );

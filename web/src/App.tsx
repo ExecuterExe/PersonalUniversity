@@ -5,8 +5,10 @@ import {
   GraduationCap,
   Inbox,
   Layers,
+  NotebookPen,
   Settings,
   Sun,
+  Trophy,
 } from 'lucide-react';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useState } from 'react';
@@ -21,7 +23,10 @@ import { SettingsScreen } from './screens/Settings';
 import { SetupWizard, storedStep } from './screens/Setup';
 import { StatsScreen } from './screens/Stats';
 import { TodayScreen } from './screens/Today';
-import type { GoogleStatus, Today } from './types';
+import { TimeUpDialog } from './screens/Focus';
+import { PracticeScreen } from './screens/Practice';
+import { ProgressMini, ProgressNotice, ProgressScreen } from './screens/Progress';
+import type { GoogleStatus, Today, StudyProgress } from './types';
 import { Alert, Loading, Progress } from './ui';
 
 const ROUTES = [
@@ -29,6 +34,8 @@ const ROUTES = [
   { id: 'schedule', title: 'Расписание', icon: CalendarDays },
   { id: 'decisions', title: 'Решения', icon: Inbox },
   { id: 'disciplines', title: 'Дисциплины', icon: BookOpen },
+  { id: 'practice', title: 'Практика', icon: NotebookPen },
+  { id: 'progress', title: 'Прогресс', icon: Trophy },
   { id: 'semester', title: 'Семестр', icon: Layers },
   { id: 'stats', title: 'Статистика', icon: BarChart3 },
   { id: 'settings', title: 'Настройки', icon: Settings },
@@ -104,6 +111,7 @@ function GoogleZoneWarning({ googleZone, today }: { googleZone: string; today: T
 function Shell() {
   const { refresh } = useRefresh();
   const { data: today, error } = useApi<Today>('/api/today');
+  const { data: progress } = useApi<StudyProgress>('/api/progress');
   const { data: google } = useApi<GoogleStatus>('/api/google/status');
   const [route, navigate] = useHashRoute('today');
   const [wizardStep, setWizardStep] = useState<number | null>(storedStep);
@@ -116,7 +124,20 @@ function Shell() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  // Сервер ещё запускается или перезапускается — пробуем снова каждые пару секунд, пока не ответит.
+  // После возвращения во вкладку сверяем состояние, изменившееся в другом окне.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refresh]);
+
+  // Повторяем запрос после временного сбоя соединения с локальным сервером.
   useEffect(() => {
     if (!error) return;
     const id = setInterval(refresh, 3000);
@@ -125,6 +146,12 @@ function Shell() {
 
   // Идёт занятие и открыт его экран — гасим свет: тёмный режим погружения.
   const immersive = Boolean(today?.timer) && route === 'today';
+  const timer = today?.timer;
+  useEffect(() => {
+    if (!timer || timer.overtime || timer.remainingMs <= 0) return;
+    const timeout = setTimeout(refresh, timer.remainingMs);
+    return () => clearTimeout(timeout);
+  }, [timer, refresh]);
   useEffect(() => {
     document.documentElement.classList.toggle('immersive', immersive);
   }, [immersive]);
@@ -190,6 +217,7 @@ function Shell() {
         ) : (
           <div className="sidebar-footer">Семестр ещё не составлен</div>
         )}
+        <ProgressMini data={progress} />
       </aside>
       <main className="main">
         <div
@@ -205,6 +233,12 @@ function Shell() {
                 : 0,
           }}
         >
+          {error && (
+            <Alert tone="warning">
+              Не удалось обновить данные приложения: {error}. Пока показаны последние полученные
+              данные; обновление повторится автоматически.
+            </Alert>
+          )}
           {googleMismatch && googleZone && (
             <GoogleZoneWarning googleZone={googleZone} today={today} />
           )}
@@ -223,17 +257,26 @@ function Shell() {
             </Alert>
           )}
           {google?.connected && !google.needsReauth && google.lastSyncError && (
-            <Alert tone="warning">Google: {google.lastSyncError}</Alert>
+            <Alert tone="warning">
+              Последняя ошибка при обновлении Google Календаря: {google.lastSyncError}
+            </Alert>
           )}
         </div>
-        {route === 'today' && <TodayScreen today={today} />}
+        {route === 'today' && <TodayScreen today={today} progress={progress} />}
         {route === 'schedule' && <ScheduleScreen today={today} />}
         {route === 'decisions' && <DecisionsScreen today={today} />}
         {route === 'disciplines' && <DisciplinesScreen semesterDisciplineIds={semesterIds} />}
         {route === 'semester' && <SemesterScreen today={today} />}
         {route === 'stats' && <StatsScreen today={today} />}
+        {route === 'practice' && <PracticeScreen today={today} />}
+        {route === 'progress' && <ProgressScreen />}
         {route === 'settings' && <SettingsScreen />}
       </main>
+      {timer && timer.paused && !timer.overtime && timer.remainingMs === 0 ? (
+        <TimeUpDialog key={timer.sessionId} timer={timer} onFinished={() => navigate('today')} />
+      ) : (
+        <ProgressNotice data={progress} />
+      )}
     </div>
   );
 }

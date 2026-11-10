@@ -109,7 +109,13 @@ export function registerGoogleRoutes(app: FastifyInstance, deps: Deps, config: C
   app.get('/api/google/calendars', async () => {
     const google = requireGoogle(deps);
     const account = deps.store.getGoogleAccount();
-    return (await google.api.listCalendars())
+    const calendars = await google.api.listCalendars();
+    // Сеть уже восстановилась; не показываем прежний сетевой сбой как текущий.
+    // Ошибки записи событий этим чтением не снимаются.
+    if (deps.store.getGoogleAccount().lastSyncError === 'Нет связи с Google') {
+      deps.store.updateGoogleAccount({ lastSyncError: null });
+    }
+    return calendars
       .filter((c) => c.id !== account.calendarId)
       .map((c) => ({
         id: c.id,

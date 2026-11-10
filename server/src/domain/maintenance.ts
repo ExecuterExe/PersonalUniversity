@@ -32,6 +32,7 @@ export interface ExportedSummary {
   keyConcepts: string;
   retelling: string;
   continueFrom: string;
+  nextQuestion: string;
 }
 
 export interface ExportedDiscipline {
@@ -47,7 +48,7 @@ export function exportSummaries(deps: Deps): ExportedDiscipline[] {
   const timezone = appSettings(store).timezone;
   const byDiscipline = new Map<string, ExportedDiscipline>();
   for (const s of store.listSummaries()) {
-    const d = store.getDiscipline(s.disciplineId);
+    const d = store.getDiscipline(s.disciplineId, true);
     const session = store.getSession(s.semesterId, s.sessionId);
     const entry = byDiscipline.get(s.disciplineId) ?? {
       name: d?.name ?? s.disciplineId,
@@ -60,6 +61,7 @@ export function exportSummaries(deps: Deps): ExportedDiscipline[] {
       keyConcepts: s.keyConcepts,
       retelling: s.retelling,
       continueFrom: s.continueFrom,
+      nextQuestion: s.nextQuestion ?? '',
     });
     byDiscipline.set(s.disciplineId, entry);
   }
@@ -75,6 +77,7 @@ export function summariesMarkdown(disciplines: readonly ExportedDiscipline[]): s
       if (s.keyConcepts) lines.push('**Ключевые понятия**', '', s.keyConcepts, '');
       if (s.retelling) lines.push('**Пересказ**', '', s.retelling, '');
       if (s.continueFrom) lines.push(`**С чего продолжить:** ${s.continueFrom}`, '');
+      if (s.nextQuestion) lines.push('**Вопрос следующему себе:**', '', s.nextQuestion, '');
     }
   }
   return lines.join('\n');

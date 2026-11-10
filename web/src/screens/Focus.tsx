@@ -14,7 +14,7 @@ import {
   Droplets,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { api } from '../api';
 import { useColor } from '../colors';
 import { useConfirm } from '../confirm';
@@ -75,6 +75,8 @@ function PhaseRing({ view, totalCycles }: { view: TimerView; totalCycles: number
   const v = base.view;
   const elapsed = v.paused ? 0 : now - base.at;
   const phaseLeft = v.phaseLengthMs - v.phaseElapsedMs - elapsed;
+  const slotLeft = Math.max(0, v.remainingMs - (now - base.at));
+  const finalPhase = !v.overtime && slotLeft < phaseLeft;
   const share = Math.min(1, Math.max(0, (v.phaseElapsedMs + elapsed) / v.phaseLengthMs));
   const focusPhase = v.phase === 'focus';
 
@@ -138,8 +140,10 @@ function PhaseRing({ view, totalCycles }: { view: TimerView; totalCycles: number
           {share > 0.005 && <circle className="ring-head" cx={head.x} cy={head.y} r={5} />}
         </svg>
         <div className="ring-center">
-          <span className="countdown">{countdown(phaseLeft)}</span>
-          <span className="phase">{v.paused ? 'Пауза' : PHASE[v.phase]}</span>
+          <span className="countdown">{countdown(finalPhase ? slotLeft : phaseLeft)}</span>
+          <span className="phase">
+            {v.paused ? 'Пауза' : finalPhase ? 'До конца занятия' : PHASE[v.phase]}
+          </span>
         </div>
       </div>
       <div className="cycles" aria-label={`Цикл ${v.cycle} из ${totalCycles}`}>
@@ -151,21 +155,83 @@ function PhaseRing({ view, totalCycles }: { view: TimerView; totalCycles: number
   );
 }
 
+/** Диалог доступен из любого раздела, пока сервер ждёт решения на границе занятия. */
+export function TimeUpDialog({ timer, onFinished }: { timer: TimerView; onFinished: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const { run, busy, error } = useAction();
+  useEffect(() => {
+    ref.current?.showModal();
+    chime();
+  }, []);
+  const sessionId = timer.sessionId;
+  return (
+    <dialog
+      ref={ref}
+      className="award-dialog"
+      aria-labelledby="time-up-title"
+      onCancel={(e) => e.preventDefault()}
+    >
+      <div className="award-dialog-body">
+        <h2 id="time-up-title">Время занятия вышло</h2>
+        <p>
+          Таймер на паузе. Можно записать итог или продолжить сверх плана. Ожидание ответа не
+          засчитывается.
+        </p>
+        {timer.autoPause?.reason === 'sleep' && (
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() =>
+              void run(() => api.post('/api/timer/resume', { sessionId, countPaused: true }))
+            }
+          >
+            Я занимался во время сна компьютера — зачесть до конца плана
+          </Button>
+        )}
+        <Button
+          disabled={busy}
+          onClick={() =>
+            void run(async () => {
+              await api.post('/api/timer/finish', { sessionId });
+              onFinished();
+            })
+          }
+        >
+          Завершить и записать итог
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={busy}
+          onClick={() =>
+            void run(() => api.post('/api/timer/resume', { sessionId, continueBeyondPlan: true }))
+          }
+        >
+          Продолжить сверх плана
+        </Button>
+        <ErrorText error={error} />
+      </div>
+    </dialog>
+  );
+}
+
 function SessionProgress({ view }: { view: TimerView }) {
   const [base] = useState(() => ({ view, at: Date.now() }));
   const now = useNow(1000);
   const v = base.view;
   const elapsed = v.paused ? 0 : now - base.at;
-  const active = v.activeMs + elapsed;
-  const remaining = Math.max(0, v.plannedMs - active);
+  const remaining = Math.max(0, v.remainingMs - (now - base.at));
   const focus = v.focusMs + (v.phase === 'focus' && !v.paused ? elapsed : 0);
   return (
     <div className="stack" style={{ width: '100%', maxWidth: 420, gap: 8 }}>
-      <Progress value={active / v.plannedMs} />
+      <Progress value={1 - remaining / v.plannedMs} label="Запланированное время занятия" />
       <div className="row between faint">
         <span>Чистая учёба: {Math.floor(focus / 60_000)} мин</span>
         <span>
-          {remaining > 0 ? `до конца занятия ${countdown(remaining)}` : 'время занятия вышло'}
+          {remaining > 0
+            ? `до конца занятия ${countdown(remaining)}`
+            : v.overtime
+              ? 'Сверх плана'
+              : 'Время занятия вышло'}
         </span>
       </div>
     </div>
@@ -338,11 +404,10 @@ function AutoPauseNote({
     const dt = local(t, zone).setLocale('ru');
     return dt.toISODate() === today ? dt.toFormat('HH:mm') : dt.toFormat('d MMMM, HH:mm');
   };
-  if (pause.reason === 'away') {
+  if (pause.reason !== 'sleep') {
     return (
       <Alert tone="info">
-        Время занятия вышло, когда страница была закрыта, — таймер остановлен в {at(pause.from)}.
-        Можно завершить занятие или продолжить.
+        Таймер остановлен в {at(pause.from)}. Можно завершить занятие или продолжить.
       </Alert>
     );
   }
@@ -373,11 +438,11 @@ export function FocusView({ timer }: { timer: TimerView }) {
   const totalCycles = pomodoro
     ? Math.ceil(timer.plannedMs / ((pomodoro.focusMinutes + pomodoro.breakMinutes) * 60_000))
     : timer.cycle;
-  const key = `${timer.activeMs}-${timer.paused}`;
+  const key = `${timer.activeMs}-${timer.paused}-${timer.remainingMs}`;
   useWakeLock(!timer.paused);
 
   const finish = async () => {
-    const early = timer.plannedMs - timer.activeMs > 60_000;
+    const early = timer.remainingMs > 60_000 && !timer.overtime;
     if (
       early &&
       !(await confirm({
@@ -413,7 +478,7 @@ export function FocusView({ timer }: { timer: TimerView }) {
           />
         )}
         <PhaseRing key={key} view={timer} totalCycles={totalCycles} />
-        <SessionProgress key={`p-${key}`} view={timer} />
+        <SessionProgress key={`p-${key}-${timer.remainingMs}`} view={timer} />
         <div className="row">
           {timer.paused ? (
             <Button
@@ -457,6 +522,11 @@ export function FocusView({ timer }: { timer: TimerView }) {
             {details.continueHint && (
               <Alert tone="info">
                 <strong>С чего продолжить:</strong> {details.continueHint}
+              </Alert>
+            )}
+            {details.nextQuestion && (
+              <Alert>
+                <strong>Вопрос с прошлого занятия:</strong> {details.nextQuestion}
               </Alert>
             )}
             <Card title="Под рукой" icon={<BookMarked size={18} color="var(--primary)" />}>

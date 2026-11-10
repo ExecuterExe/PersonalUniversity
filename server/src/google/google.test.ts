@@ -7,6 +7,165 @@ import { syncIfPlanChanged } from './sync';
 
 const SATURDAY_EVENING = msk('2026-10-24T21:10');
 
+describe('удаление семестра вместе с Google событиями', () => {
+  it('повторное удаление уже удалённого семестра успешно и не трогает новый', async () => {
+    const { t, google } = setup();
+    await connect(t);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    const old = t.deps.store.findSemester('active')!;
+    expect((await t.call('DELETE', `/api/semesters/${old.id}`)).status).toBe(204);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    const current = t.deps.store.findSemester('active')!;
+    const before = google.ownEvents().map((e) => e.id);
+    const requests = google.requests;
+    const repeated = await Promise.all([
+      t.call('DELETE', `/api/semesters/${old.id}`),
+      t.call('DELETE', `/api/semesters/${old.id}`),
+    ]);
+    expect(repeated.map((r) => r.status)).toEqual([204, 204]);
+    expect(google.requests).toBe(requests);
+    expect(google.ownEvents().map((e) => e.id)).toEqual(before);
+    expect(t.deps.store.findSemester('active')?.id).toBe(current.id);
+  });
+
+  it('успешное удаление очищает прежнюю ошибку Google и главный экран', async () => {
+    const { t } = setup();
+    await connect(t);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    const sem = t.deps.store.findSemester('active')!;
+    t.deps.store.updateGoogleAccount({ lastSyncError: 'Нет связи с Google' });
+    expect((await t.call('DELETE', `/api/semesters/${sem.id}`)).status).toBe(204);
+    expect((await t.call('GET', '/api/today')).body).toMatchObject({
+      semester: null,
+      draftPending: false,
+    });
+    expect((await t.call('GET', '/api/google/status')).body.lastSyncError).toBeNull();
+    expect(t.deps.store.getMeta(`semesterDeletion:${sem.id}`)).toBeNull();
+  });
+
+  it('после восстановления сети чтение календарей снимает сетевую ошибку, не скрывая ошибки записи', async () => {
+    const { t, google } = setup();
+    await connect(t);
+    google.online = false;
+    const failed = await t.call('GET', '/api/google/calendars');
+    expect(failed.status).toBe(503);
+    expect(failed.body.error).toBe('Нет связи с Google');
+    google.online = true;
+    t.deps.store.updateGoogleAccount({ lastSyncError: 'Нет связи с Google' });
+    expect((await t.call('GET', '/api/google/calendars')).status).toBe(200);
+    expect(t.deps.store.getGoogleAccount().lastSyncError).toBeNull();
+    t.deps.store.updateGoogleAccount({ lastSyncError: 'Google ответил ошибкой 403' });
+    await t.call('GET', '/api/google/calendars');
+    expect(t.deps.store.getGoogleAccount().lastSyncError).toBe('Google ответил ошибкой 403');
+  });
+  it('убирает прошлые, перенесённые события и копии, сохраняя чужие события', async () => {
+    const { t, google } = setup();
+    await connect(t);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    const sem = t.deps.store.findSemester('active')!;
+    const calendarId = google.ownCalendar()!.id;
+    const event = google.ownEvents()[0]!;
+    // Перенос далеко за границы семестра, включая копию без локальной связи.
+    event.start = { dateTime: '2030-01-01T10:00:00Z' };
+    event.end = { dateTime: '2030-01-01T11:00:00Z' };
+    google.addEvent(calendarId, { ...event });
+    const other = google.addEvent(calendarId, timed('2026-10-25', '18:00', '19:00', 'Личное'));
+    const previous = google.addEvent(calendarId, {
+      ...timed('2026-10-25', '19:00', '20:00', 'Другой семестр'),
+      extendedProperties: { private: { ouSemester: 'previous', ouSession: 's1' } },
+    });
+    t.setNow(msk('2026-11-01T20:00'));
+    expect((await t.call('DELETE', `/api/semesters/${sem.id}`)).status).toBe(204);
+    expect(
+      google
+        .ownEvents()
+        .map((e) => e.id)
+        .sort(),
+    ).toEqual([other.id, previous.id].sort());
+    expect(t.deps.store.listLinks(sem.id)).toEqual([]);
+    expect(t.deps.store.getSemester(sem.id)).toBeNull();
+    await t.call('POST', '/api/google/sync');
+    expect(google.ownEvents()).toHaveLength(2);
+  });
+
+  it('сохраняет семестр при сбое посреди удаления и позволяет повторить', async () => {
+    const google = new FakeGoogle();
+    let deletions = 0;
+    let fail = true;
+    const t = testApp(SATURDAY_EVENING, [], {
+      fetch: async (input, init) => {
+        if (init?.method === 'DELETE' && ++deletions === 3 && fail) {
+          throw new TypeError('offline');
+        }
+        return google.fetch(input, init);
+      },
+    });
+    await connect(t);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    const sem = t.deps.store.findSemester('active')!;
+    const failed = await t.call('DELETE', `/api/semesters/${sem.id}`);
+    expect(failed.status).toBe(409);
+    expect(failed.body.error).toContain('Удаление семестра не завершено');
+    expect(t.deps.store.getSemester(sem.id)).not.toBeNull();
+    expect(t.deps.store.listLinks(sem.id)).toHaveLength(72);
+    expect((await t.call('GET', '/api/today')).body.semester.deletionPending).toBe(true);
+    const remainingEvents = google.ownEvents().length;
+    const requests = google.requests;
+    // Новая очередь имитирует перезапуск сервиса: события не возвращаются.
+    const { store, ...otherDeps } = t.deps;
+    expect(await syncIfPlanChanged({ ...otherDeps, store })).toBeNull();
+    expect(google.requests).toBe(requests);
+    expect(google.ownEvents()).toHaveLength(remainingEvents);
+    fail = false;
+    expect((await t.call('DELETE', `/api/semesters/${sem.id}`)).status).toBe(204);
+    expect(google.ownEvents()).toEqual([]);
+    expect(t.deps.store.getGoogleAccount().lastSyncError).toBeNull();
+  });
+
+  it('просит восстановить отключённый доступ и не теряет связи с событиями', async () => {
+    const { t, google } = setup();
+    await connect(t);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    const sem = t.deps.store.findSemester('active')!;
+    await t.call('POST', '/api/google/disconnect');
+    expect((await t.call('DELETE', `/api/semesters/${sem.id}`)).status).toBe(409);
+    expect(t.deps.store.getSemester(sem.id)).not.toBeNull();
+    expect(google.ownEvents()).toHaveLength(72);
+  });
+
+  it('удаляет семестр, если сам календарь уже удалён в Google', async () => {
+    const { t, google } = setup();
+    await connect(t);
+    await activeSemester(t);
+    await t.call('POST', '/api/google/sync');
+    const sem = t.deps.store.findSemester('active')!;
+    google.removeCalendar(google.ownCalendar()!.id);
+    expect((await t.call('DELETE', `/api/semesters/${sem.id}`)).status).toBe(204);
+    expect(t.deps.store.listLinks(sem.id)).toEqual([]);
+  });
+
+  it('ожидает текущую синхронизацию, после удаления события не возвращаются', async () => {
+    const { t, google } = setup();
+    await connect(t);
+    await activeSemester(t);
+    const sem = t.deps.store.findSemester('active')!;
+    google.latencyMs = 1;
+    const first = t.call('POST', '/api/google/sync');
+    const deletion = t.call('DELETE', `/api/semesters/${sem.id}`);
+    const last = t.call('POST', '/api/google/sync');
+    const results = await Promise.all([first, deletion, last]);
+    expect(results.map((r) => r.status)).toEqual([200, 204, 200]);
+    expect(google.ownEvents()).toEqual([]);
+    expect(t.deps.store.getSemester(sem.id)).toBeNull();
+  });
+});
+
 function timed(
   day: string,
   from: string,

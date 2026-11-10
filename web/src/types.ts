@@ -82,16 +82,60 @@ export interface Summary {
   keyConcepts: string;
   retelling: string;
   continueFrom: string;
+  nextQuestion?: string;
   createdAt: Instant;
 }
 
+export interface PracticeSummary extends Summary {
+  id: string;
+  semesterId: string;
+  disciplineId: string;
+  disciplineName: string;
+  sessionStart: Instant;
+}
+
 export interface SessionDetails {
+  nextQuestion: string;
   session: SessionView;
   goal: string;
   metrics: string;
   continueHint: string;
   sources: Source[];
   summary: Summary | null;
+}
+
+export interface StudyAward {
+  quality: { id: number; word: string } | null;
+  qualityOutcome: 'legacy' | 'found' | 'miss' | 'complete' | 'disabled';
+  id: string;
+  disciplineName: string;
+  xp: number;
+  levelBefore: number;
+  levelAfter: number;
+  unlocked: { level: number; title: string }[];
+  offers: { id: string; title: string }[];
+  chosenIndex: number | null;
+  usedAt: number | null;
+  createdAt: number;
+}
+export interface StudyProgress {
+  rewardsEnabled: boolean;
+  qualitiesEnabled: boolean;
+  collection: { id: number; word: string; foundAt: number }[];
+  collectionSize: number;
+  titlePinned: boolean;
+  xp: number;
+  level: number;
+  levelFloor: number;
+  nextLevelXp: number | null;
+  title: string;
+  titleLevel: number;
+  lessons: number;
+  unlocked: { level: number; title: string }[];
+  options: { id: string; title: string; enabled: boolean }[];
+  pending: StudyAward | null;
+  wallet: StudyAward[];
+  used: StudyAward[];
 }
 
 export interface Compromise {
@@ -102,6 +146,7 @@ export interface Compromise {
 
 export interface SemesterView {
   id: string;
+  deletionPending: boolean;
   status: 'draft' | 'active' | 'finished';
   startDate: string;
   endDate: string;

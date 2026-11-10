@@ -87,6 +87,7 @@ export interface SummaryRecord {
   keyConcepts: string;
   retelling: string;
   continueFrom: string;
+  nextQuestion?: string;
   createdAt: Instant;
 }
 
@@ -304,6 +305,7 @@ function toSummary(r: Row): SummaryRecord {
     keyConcepts: r.key_concepts as string,
     retelling: r.retelling as string,
     continueFrom: r.continue_from as string,
+    nextQuestion: (r.next_question as string | undefined) ?? '',
     createdAt: Number(r.created_at),
   };
 }
@@ -361,13 +363,27 @@ export class Store {
 
   listDisciplines(includeArchived = false): DisciplineRecord[] {
     return this.all(
-      `SELECT * FROM disciplines ${includeArchived ? '' : 'WHERE archived_at IS NULL'} ORDER BY created_at, id`,
+      `SELECT * FROM disciplines WHERE deleted_at IS NULL ${includeArchived ? '' : 'AND archived_at IS NULL'} ORDER BY created_at, id`,
     ).map(toDiscipline);
   }
 
-  getDiscipline(id: string): DisciplineRecord | null {
-    const row = this.get('SELECT * FROM disciplines WHERE id = $id', { id });
+  getDiscipline(id: string, includeDeleted = false): DisciplineRecord | null {
+    const row = this.get(
+      `SELECT * FROM disciplines WHERE id = $id ${includeDeleted ? '' : 'AND deleted_at IS NULL'}`,
+      { id },
+    );
     return row ? toDiscipline(row) : null;
+  }
+
+  deleteDiscipline(id: string, now: Instant): boolean {
+    return this.transaction(() => {
+      const changed = this.run(
+        'UPDATE disciplines SET deleted_at = $now WHERE id = $id AND deleted_at IS NULL',
+        { id, now },
+      );
+      if (changed) this.run('DELETE FROM sources WHERE discipline_id = $id', { id });
+      return changed > 0;
+    });
   }
 
   saveDiscipline(d: DisciplineRecord): void {
@@ -476,7 +492,27 @@ export class Store {
   }
 
   deleteSemester(id: string): void {
-    this.run('DELETE FROM semesters WHERE id = $id', { id });
+    this.transaction(() => {
+      const removed = this.listSummaries().filter((s) => s.semesterId === id);
+      this.run('DELETE FROM timer WHERE semester_id = $id', { id });
+      this.run('DELETE FROM calendar_links WHERE semester_id = $id', { id });
+      // Все ключи решений имеют вид «тип:семестр:…».
+      this.run(
+        "DELETE FROM decisions WHERE substr(key, instr(key, ':') + 1, length($id) + 1) = $id || ':'",
+        { id },
+      );
+      this.run('DELETE FROM semesters WHERE id = $id', { id });
+      this.run('DELETE FROM meta WHERE key = $key', { key: `semesterDeletion:${id}` });
+      const remaining = this.listSummaries();
+      for (const disciplineId of new Set(removed.map((s) => s.disciplineId))) {
+        const d = this.getDiscipline(disciplineId);
+        const last = removed.filter((s) => s.disciplineId === disciplineId).at(-1);
+        if (d && last && d.continueHint === last.continueFrom) {
+          const previous = remaining.filter((s) => s.disciplineId === disciplineId).at(-1);
+          this.saveDiscipline({ ...d, continueHint: previous?.continueFrom ?? '' });
+        }
+      }
+    });
   }
 
   // План: каркас и занятия
@@ -557,8 +593,8 @@ export class Store {
 
   saveSummary(s: SummaryRecord): void {
     this.run(
-      `INSERT INTO summaries (semester_id, session_id, discipline_id, key_concepts, retelling, continue_from, created_at)
-       VALUES ($semester, $session, $discipline, $concepts, $retelling, $continue, $created)`,
+      `INSERT INTO summaries (semester_id, session_id, discipline_id, key_concepts, retelling, continue_from, next_question, created_at)
+       VALUES ($semester, $session, $discipline, $concepts, $retelling, $continue, $question, $created)`,
       {
         semester: s.semesterId,
         session: s.sessionId,
@@ -566,6 +602,7 @@ export class Store {
         concepts: s.keyConcepts,
         retelling: s.retelling,
         continue: s.continueFrom,
+        question: s.nextQuestion ?? '',
         created: s.createdAt,
       },
     );
@@ -573,6 +610,32 @@ export class Store {
 
   listSummaries(): SummaryRecord[] {
     return this.all('SELECT * FROM summaries ORDER BY created_at').map(toSummary);
+  }
+
+  latestQuestion(disciplineId: string, before: Instant): string {
+    const row = this.get(
+      `SELECT su.next_question FROM summaries su
+      JOIN sessions s ON s.semester_id = su.semester_id AND s.id = su.session_id
+      WHERE su.discipline_id = $id AND s.start < $before
+      ORDER BY s.start DESC, su.created_at DESC LIMIT 1`,
+      { id: disciplineId, before },
+    );
+    return (row?.next_question as string | undefined) ?? '';
+  }
+
+  /** Журнал одним запросом, без обращений к базе для каждого отдельного занятия. */
+  listSummaryDetails(): (SummaryRecord & { disciplineName: string; sessionStart: Instant })[] {
+    return this.all(
+      `SELECT su.*, d.name AS discipline_name,
+      COALESCE(s.start, su.created_at) AS session_start FROM summaries su
+      LEFT JOIN disciplines d ON d.id = su.discipline_id
+      LEFT JOIN sessions s ON s.semester_id = su.semester_id AND s.id = su.session_id
+      ORDER BY session_start DESC, su.created_at DESC, su.semester_id, su.session_id`,
+    ).map((r) => ({
+      ...toSummary(r),
+      disciplineName: (r.discipline_name as string | null) ?? 'Дисциплина без названия',
+      sessionStart: r.session_start as Instant,
+    }));
   }
 
   // Таймер идущего занятия

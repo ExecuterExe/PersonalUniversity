@@ -2,47 +2,35 @@ import { plural, SESSION_FORMS } from '@ou/engine';
 import { DateTime } from 'luxon';
 import {
   ArrowRight,
-  BookmarkCheck,
-  Brain,
   CalendarDays,
   Check,
   Clock,
-  Coffee,
-  Flame,
-  Hourglass,
+  X,
   Inbox,
   Layers,
-  Moon,
   NotebookPen,
   Play,
-  Sparkles,
-  Sun,
-  Sunrise,
-  Sunset,
-  Target,
-  TrendingUp,
   Zap,
-  type LucideIcon,
 } from 'lucide-react';
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useAccent, useColor } from '../colors';
 import { countdown, formatDuration, formatPercent, local, ORIGIN, STATUS, time } from '../format';
 import { celebrate } from '../fx';
-import { useAction, useApi, useNow } from '../hooks';
-import type { SessionDetails, SessionView, Stats, Today } from '../types';
-import { Alert, Badge, Button, Card, Empty, ErrorText, Field, PageHeader } from '../ui';
+import { useAction, useApi, useNow, useRefresh } from '../hooks';
+import type {
+  SessionDetails,
+  SessionView,
+  Stats,
+  Today,
+  StudyAward,
+  StudyProgress,
+} from '../types';
+import { Badge, Button, Card, Empty, ErrorText, Field, PageHeader } from '../ui';
 import { FocusView } from './Focus';
+import { ProgressMini } from './Progress';
 
 const EARLY_START_MS = 30 * 60_000;
-
-function greeting(now: number, zone: string): { text: string; icon: LucideIcon } {
-  const hour = local(now, zone).hour;
-  if (hour >= 5 && hour < 12) return { text: 'Доброе утро', icon: Sunrise };
-  if (hour >= 12 && hour < 18) return { text: 'Добрый день', icon: Sun };
-  if (hour >= 18) return { text: 'Добрый вечер', icon: Sunset };
-  return { text: 'Доброй ночи', icon: Moon };
-}
 
 /** «через 25 мин», «через 2 ч 10 мин», «завтра в 10:00», «пн 2 ноября в 10:00» */
 function when(start: number, now: number, zone: string): string {
@@ -65,233 +53,167 @@ const STATUS_TONE: Record<SessionView['status'], 'primary' | 'success' | 'danger
 
 /** Итог занятия: без него следующее не начнётся (методология, раздел 8). */
 export function SummaryCard({ session, zone }: { session: SessionView; zone: string }) {
-  const [keyConcepts, setKeyConcepts] = useState('');
   const [retelling, setRetelling] = useState('');
   const [continueFrom, setContinueFrom] = useState('');
+  const [nextQuestion, setNextQuestion] = useState('');
   const { run, error, busy } = useAction();
   const color = useColor(session.disciplineId);
+
+  const save = async () => {
+    if (busy || !retelling.trim()) return;
+    const saved = await run(() =>
+      api.post<{ award: StudyAward | null }>(`/api/sessions/${session.id}/summary`, {
+        retelling,
+        continueFrom,
+        nextQuestion,
+      }),
+    );
+    if (saved && !saved.award) celebrate('Занятие завершено', 'Итог сохранён');
+  };
+
   return (
     <Card
-      title={`Итог: ${session.disciplineName}`}
-      icon={<NotebookPen size={20} color={color.accent} />}
-      action={
-        session.actualMinutes !== undefined && (
-          <Badge tone="success">чистая учёба {formatDuration(session.actualMinutes)}</Badge>
-        )
-      }
+      className="lesson-summary"
+      title="Итог занятия"
+      icon={<NotebookPen size={19} color={color.accent} />}
     >
-      <div className="stack">
-        <p className="faint">
-          {local(session.start, zone).setLocale('ru').toFormat('cccc, d MMMM')} ·{' '}
+      <div className="lesson-summary-meta">
+        <strong>{session.disciplineName}</strong>
+        <span>
+          {local(session.start, zone).setLocale('ru').toFormat('d MMMM')} ·{' '}
           {time(session.start, zone)}–{time(session.end, zone)}
-        </p>
-        <Alert tone="info">
-          Сначала попробуй вспомнить, не заглядывая в материалы, — так знания закрепляются лучше
-          всего.
-        </Alert>
-        <div className="grid-2">
-          <Field label="Ключевые понятия" hint="Списком, как вспоминается">
-            <textarea
-              className="textarea"
-              value={keyConcepts}
-              onChange={(e) => setKeyConcepts(e.target.value)}
-            />
-          </Field>
-          <Field label="Короткий пересказ" hint="Своими словами, пара абзацев">
-            <textarea
-              className="textarea"
-              value={retelling}
-              onChange={(e) => setRetelling(e.target.value)}
-            />
-          </Field>
-        </div>
-        <Field
-          label="С чего продолжить в следующий раз"
-          hint="Необязательно — покажется перед следующим занятием"
-        >
-          <input
-            className="input"
-            value={continueFrom}
-            placeholder="Например: глава 3, раздел о сигналах"
-            onChange={(e) => setContinueFrom(e.target.value)}
+        </span>
+        {session.actualMinutes !== undefined && (
+          <Badge tone="success">{formatDuration(session.actualMinutes)} учёбы</Badge>
+        )}
+      </div>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <Field label="Что получилось за занятие?">
+          <textarea
+            className="textarea lesson-note"
+            rows={4}
+            maxLength={20000}
+            value={retelling}
+            onChange={(e) => setRetelling(e.target.value)}
+            placeholder="Например: решил три задачи на JOIN. В последней пока не понял, откуда взялись дубликаты."
           />
         </Field>
-        <div className="row">
-          <Button
-            icon={<Sparkles size={17} />}
-            disabled={busy || (!keyConcepts.trim() && !retelling.trim())}
-            onClick={() =>
-              void run(async () => {
-                await api.post(`/api/sessions/${session.id}/summary`, {
-                  keyConcepts,
-                  retelling,
-                  continueFrom,
-                });
-                return true;
-              }).then((saved) => {
-                if (!saved) return;
-                celebrate(
-                  'Занятие засчитано!',
-                  session.actualMinutes
-                    ? `+${formatDuration(session.actualMinutes)} чистой учёбы — так держать`
-                    : 'Так держать',
-                );
-              })
-            }
-          >
-            Записать итог
-          </Button>
-          <span className="faint">Достаточно одного из двух полей.</span>
-        </div>
+        <details className="lesson-next">
+          <summary>Заметка на следующее занятие</summary>
+          <div className="stack">
+            <Field label="С чего продолжить">
+              <input
+                className="input"
+                maxLength={2000}
+                value={continueFrom}
+                onChange={(e) => setContinueFrom(e.target.value)}
+                placeholder="Например: вернуться к третьей задаче"
+              />
+            </Field>
+            <Field label="Вопрос себе">
+              <input
+                className="input"
+                maxLength={2000}
+                value={nextQuestion}
+                onChange={(e) => setNextQuestion(e.target.value)}
+                placeholder="Как проверить, что строки не удвоились?"
+              />
+            </Field>
+          </div>
+        </details>
         <ErrorText error={error} />
-      </div>
+        <div>
+          <Button type="submit" icon={<Check size={16} />} disabled={busy || !retelling.trim()}>
+            {busy ? 'Сохраняю…' : 'Сохранить итог'}
+          </Button>
+        </div>
+      </form>
     </Card>
   );
 }
 
-/** Рисунок героя: пятна света и орбиты со «спутниками». */
-function HeroArt() {
-  return (
-    <div className="hero-art" aria-hidden="true">
-      <span className="orb o1" />
-      <span className="orb o2" />
-      <span className="orb o3" />
-      <svg className="orbits" viewBox="0 0 420 420">
-        <circle className="path" cx="210" cy="210" r="200" />
-        <circle className="path" cx="210" cy="210" r="150" />
-        <circle className="path" cx="210" cy="210" r="100" />
-        <g>
-          <circle cx="210" cy="10" r="5" fill="#fff" />
-          <circle cx="410" cy="210" r="3" fill="#fff" opacity="0.6" />
-        </g>
-        <g>
-          <circle cx="210" cy="60" r="4" fill="#c4f1ff" />
-          <circle cx="60" cy="210" r="3" fill="#fff" opacity="0.7" />
-          <circle cx="310" cy="210" r="2.5" fill="#ffd6f0" />
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-/**
- * Живой отсчёт до начала (или до конца, если занятие уже идёт). Время сервиса берётся с сервера
- * и дальше идёт по часам браузера — новый ответ сервера даёт новый экземпляр.
- */
-function HeroClock({
-  session,
-  serverNow,
-  zone,
-}: {
-  session: SessionView;
-  serverNow: number;
-  zone: string;
-}) {
-  const [base] = useState(() => ({ server: serverNow, client: Date.now() }));
-  const now = base.server + (useNow(1000) - base.client);
-  const start = local(session.start, zone).setLocale('ru');
-  let label: string;
-  let big: string;
-  let sub: string;
-  if (now >= session.start && now < session.end) {
-    label = 'идёт сейчас';
-    big = countdown(session.end - now);
-    sub = 'до конца';
-  } else if (start.hasSame(local(now, zone), 'day')) {
-    label = 'до начала';
-    big = countdown(session.start - now);
-    sub = `начало в ${start.toFormat('HH:mm')}`;
-  } else {
-    const tomorrow = start.hasSame(local(now, zone).plus({ days: 1 }), 'day');
-    label = tomorrow ? 'завтра' : start.toFormat('cccc');
-    big = start.toFormat('HH:mm');
-    sub = tomorrow ? 'начало' : start.toFormat('d MMMM');
-  }
-  return (
-    <div className="hero-clock">
-      <span className="label">{label}</span>
-      <span className="big">{big}</span>
-      <span className="sub">{sub}</span>
-    </div>
-  );
-}
-
-/** Главное на экране: следующее занятие и кнопка «Начать». */
-function NextHero({ session, today }: { session: SessionView; today: Today }) {
-  const { data: details } = useApi<SessionDetails>(`/api/sessions/${session.id}`);
+function LessonStart({ session, today }: { session: SessionView; today: Today }) {
   const { run, error, busy } = useAction();
+  const { refresh } = useRefresh();
   const zone = today.timezone;
-  const startable =
-    today.now >= session.start - EARLY_START_MS && today.now < session.end && !today.pendingSummary;
+  // Привязка к часам сервера, в том числе при возвращении в открытую вкладку.
+  const [base] = useState(() => Date.now());
+  const now = today.now + useNow(1000) - base;
+  const ongoing = now >= session.start;
+  const startable = now >= session.start - EARLY_START_MS && now < session.end;
+  useEffect(() => {
+    const remaining = session.end - today.now;
+    if (remaining > 60_000 || remaining <= 0) return;
+    const id = setTimeout(refresh, remaining);
+    return () => clearTimeout(id);
+  }, [session.end, today.now, refresh]);
+  const sameDay = local(session.start, zone).hasSame(local(now, zone), 'day');
+  return (
+    <>
+      <div className="today-start-row">
+        {startable && (
+          <Button
+            icon={<Play size={16} />}
+            disabled={busy}
+            onClick={() => void run(() => api.post(`/api/sessions/${session.id}/start`))}
+          >
+            Начать занятие
+          </Button>
+        )}
+        <span>
+          {ongoing
+            ? `До конца по расписанию · ${countdown(session.end - now)}`
+            : sameDay
+              ? `До начала · ${countdown(session.start - now)}`
+              : when(session.start, now, zone)}
+        </span>
+      </div>
+      <ErrorText error={error} />
+    </>
+  );
+}
+
+function NextLesson({ session, today }: { session: SessionView; today: Today }) {
+  const { data: details } = useApi<SessionDetails>(`/api/sessions/${session.id}`);
+  const style = useAccent(session.disciplineId);
+  const zone = today.timezone;
   const hint = today.continueHints[session.disciplineId];
   return (
-    <div className="hero">
-      <HeroArt />
-      <div className="hero-inner">
-        <div className="hero-body">
-          <span className="eyebrow-pill">
-            <span className={`live-dot ${startable ? '' : 'calm'}`} />
-            {startable ? 'Пора заниматься' : `Следующее · ${when(session.start, today.now, zone)}`}
-          </span>
-          <h2>{session.disciplineName}</h2>
-          <div className="hero-chips">
-            <span className="hero-chip">
-              <CalendarDays size={14} />
-              {local(session.start, zone).setLocale('ru').toFormat('cccc, d MMMM')}
-            </span>
-            <span className="hero-chip">
-              <Clock size={14} />
-              {time(session.start, zone)}–{time(session.end, zone)}
-            </span>
-            <span className="hero-chip">
-              <Hourglass size={14} />
-              {formatDuration(Math.round((session.end - session.start) / 60_000))}
-            </span>
-          </div>
-          {details?.goal && (
-            <p className="goal">
-              <Target size={16} />
-              <span>{details.goal}</span>
-            </p>
-          )}
-          {hint && (
-            <div className="hint">
-              <BookmarkCheck size={16} />
-              <span>
-                <strong>С чего продолжить:</strong> {hint}
-              </span>
-            </div>
-          )}
-          <div className="hero-actions">
-            {startable ? (
-              <Button
-                size="lg"
-                className="beckon"
-                icon={<Play size={18} />}
-                disabled={busy}
-                onClick={() => void run(() => api.post(`/api/sessions/${session.id}/start`))}
-              >
-                Начать занятие
-              </Button>
-            ) : (
-              <span className="hero-note">Начать можно за 30 минут до начала</span>
-            )}
-            {startable && today.now > session.start && (
-              <span className="hero-note">
-                Закончится по расписанию в {time(session.end, zone)} — осталось{' '}
-                {formatDuration(Math.max(1, Math.round((session.end - today.now) / 60_000)))}
-              </span>
-            )}
-          </div>
-          {error && (
-            <p className="small" style={{ marginTop: 10 }}>
-              {error}
-            </p>
-          )}
-        </div>
-        <HeroClock key={today.now} session={session} serverNow={today.now} zone={zone} />
+    <section className="today-next" style={style}>
+      <div className="today-next-label">
+        <span className="dot" />
+        Ближайшее занятие
       </div>
-    </div>
+      <h2>{session.disciplineName}</h2>
+      <p className="today-session-time">
+        <Clock size={16} />
+        {local(session.start, zone).setLocale('ru').toFormat('d MMMM')} ·{' '}
+        {time(session.start, zone)}–{time(session.end, zone)}
+      </p>
+      <LessonStart key={today.now} session={session} today={today} />
+      {(hint || details?.nextQuestion) && (
+        <details className="today-reminder">
+          <summary>
+            {details?.nextQuestion ? 'Вопрос с прошлого занятия' : 'С чего продолжить'}
+            <span className="today-preview">{details?.nextQuestion || hint}</span>
+          </summary>
+          {details?.nextQuestion && <p>{details.nextQuestion}</p>}
+          {hint && <p>{hint}</p>}
+        </details>
+      )}
+      {details?.goal && (
+        <details className="today-reminder">
+          <summary>Цель дисциплины</summary>
+          <p>{details.goal}</p>
+        </details>
+      )}
+    </section>
   );
 }
 
@@ -301,6 +223,7 @@ function TimelineItem({ s, today, next }: { s: SessionView; today: Today; next: 
   const zone = today.timezone;
   const { run, error, busy } = useAction();
   const startable =
+    !next &&
     s.status === 'planned' &&
     today.now >= s.start - EARLY_START_MS &&
     s.end > today.now &&
@@ -339,155 +262,97 @@ function Unplanned({ today }: { today: Today }) {
   const disciplines = today.semester?.disciplines.filter((d) => d.frequency !== null) ?? [];
   const [id, setId] = useState('');
   const { run, error, busy } = useAction();
+  const dialog = useRef<HTMLDialogElement>(null);
   if (disciplines.length === 0 || today.pendingSummary) return null;
   return (
-    <Card title="Хочется позаниматься сейчас" icon={<Zap size={18} color="var(--violet)" />}>
-      <div className="stack">
-        <select className="select" value={id} onChange={(e) => setId(e.target.value)}>
-          <option value="">Выбери дисциплину</option>
-          {disciplines.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-        <Button
-          variant="secondary"
-          icon={<Play size={15} />}
-          disabled={!id || busy}
-          onClick={() => void run(() => api.post('/api/sessions/unplanned', { disciplineId: id }))}
+    <>
+      <Button
+        size="sm"
+        variant="secondary"
+        icon={<Zap size={15} />}
+        onClick={() => dialog.current?.showModal()}
+      >
+        Вне расписания
+      </Button>
+      <dialog ref={dialog} aria-labelledby="unplanned-title" className="today-dialog">
+        <div className="row between">
+          <h2 id="unplanned-title">Вне расписания</h2>
+          <Button
+            variant="ghost"
+            icon={<X size={16} />}
+            aria-label="Закрыть"
+            onClick={() => dialog.current?.close()}
+          />
+        </div>
+        <form
+          className="stack"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (id && !busy)
+              void run(() => api.post('/api/sessions/unplanned', { disciplineId: id }));
+          }}
         >
-          Начать вне расписания
-        </Button>
-        <p className="faint">Пойдёт в статистику, расписание не изменится.</p>
-        <ErrorText error={error} />
-      </div>
-    </Card>
+          <Field label="Дисциплина">
+            <select className="select" value={id} onChange={(e) => setId(e.target.value)}>
+              <option value="">Выбери дисциплину</option>
+              {disciplines.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <ErrorText error={error} />
+          <Button type="submit" icon={<Play size={16} />} disabled={!id || busy}>
+            Начать занятие
+          </Button>
+        </form>
+      </dialog>
+    </>
   );
 }
 
-const METER = 112;
-const METER_STROKE = 11;
-const METER_RADIUS = (METER - METER_STROKE) / 2;
-const METER_LENGTH = 2 * Math.PI * METER_RADIUS;
-
-/** Кольцо: какая доля плана семестра (в часах чистой учёбы) уже пройдена. */
-function MeterRing({ value }: { value: number }) {
-  const share = Math.max(0, Math.min(1, value));
+function SemesterNumbers() {
+  const { data, error } = useApi<Stats | null>('/api/stats');
+  if (!data) return <ErrorText error={error} />;
+  const sum = (field: 'actualMinutes' | 'held' | 'plannedMinutes') =>
+    data.disciplines.reduce((n, d) => n + d[field], 0);
+  const planned = sum('plannedMinutes');
   return (
-    <div
-      className="meter-ring"
-      role="img"
-      aria-label={`Пройдено ${formatPercent(share)} плана семестра`}
-    >
-      <svg width={METER} height={METER}>
-        <defs>
-          <linearGradient id="meter-gradient" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#4f6cf2" />
-            <stop offset="100%" stopColor="#9b5cf0" />
-          </linearGradient>
-        </defs>
-        <circle
-          className="track"
-          cx={METER / 2}
-          cy={METER / 2}
-          r={METER_RADIUS}
-          fill="none"
-          strokeWidth={METER_STROKE}
-        />
-        <circle
-          className="fill"
-          cx={METER / 2}
-          cy={METER / 2}
-          r={METER_RADIUS}
-          fill="none"
-          stroke="url(#meter-gradient)"
-          strokeWidth={METER_STROKE}
-          strokeDasharray={METER_LENGTH}
-          strokeDashoffset={METER_LENGTH * (1 - share)}
-          style={{ '--full': METER_LENGTH } as CSSProperties}
-        />
-      </svg>
-      <div className="center">
-        <strong>{formatPercent(share)}</strong>
-        <span>плана</span>
-      </div>
+    <div className="today-numbers">
+      <dl>
+        {[
+          ['Чистая учёба', formatDuration(sum('actualMinutes'))],
+          ['Проведено', sum('held')],
+          ['Без пропусков', data.streak],
+          ['План выполнен', planned ? formatPercent(sum('actualMinutes') / planned) : '—'],
+          ['Прогноз', data.forecast.overall !== null ? formatPercent(data.forecast.overall) : '—'],
+        ].map(([name, value]) => (
+          <div key={name}>
+            <dt>{name}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <a href="#stats">Вся статистика →</a>
     </div>
   );
 }
 
-function MiniStat({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
-  return (
-    <div className="mini-stat">
-      <span className="ico">{icon}</span>
-      <span className="grow">{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function Pulse() {
-  const { data } = useApi<Stats | null>('/api/stats');
-  if (!data) return null;
-  const held = data.disciplines.reduce((sum, d) => sum + d.held, 0);
-  const actual = data.disciplines.reduce((sum, d) => sum + d.actualMinutes, 0);
-  const planned = data.disciplines.reduce((sum, d) => sum + d.plannedMinutes, 0);
-  return (
-    <Card title="Как идёт семестр" icon={<TrendingUp size={18} color="var(--primary)" />}>
-      <div className="pulse">
-        <MeterRing value={planned > 0 ? actual / planned : 0} />
-        <div className="mini-stats">
-          <MiniStat
-            icon={<Flame size={15} color="var(--warning)" />}
-            label="Серия"
-            value={data.streak}
-          />
-          <MiniStat
-            icon={<Brain size={15} color="var(--violet)" />}
-            label="Чистая учёба"
-            value={formatDuration(actual)}
-          />
-          <MiniStat
-            icon={<NotebookPen size={15} color="var(--success)" />}
-            label="Проведено"
-            value={held}
-          />
-        </div>
-      </div>
-      {data.forecast.overall !== null && (
-        <div className="forecast-line">
-          <Target size={16} color="var(--violet)" />
-          Прогноз к концу семестра
-          <strong>{formatPercent(data.forecast.overall)} плана</strong>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-export function TodayScreen({ today }: { today: Today }) {
+export function TodayScreen({ today, progress }: { today: Today; progress?: StudyProgress }) {
   const zone = today.timezone;
+  const [expanded, setExpanded] = useState(false);
+  const [showAllSessions, setShowAllSessions] = useState(false);
   if (today.timer) return <FocusView timer={today.timer} />;
 
   const date = DateTime.fromMillis(today.now, { zone }).setLocale('ru').toFormat('cccc, d MMMM');
-  const hello = greeting(today.now, zone);
   const week = today.semester?.currentWeek;
   const header = (
     <PageHeader
-      icon={<hello.icon size={24} />}
-      title={hello.text}
+      title="Сегодня"
+      icon={<CalendarDays size={23} />}
       subtitle={date[0]!.toUpperCase() + date.slice(1)}
-      actions={
-        today.semester &&
-        week !== null &&
-        week !== undefined &&
-        week > 0 && (
-          <span className="pill">
-            <Layers size={14} color="var(--violet)" />
-            Неделя {week} из {today.semester.fullWeeks}
-          </span>
-        )
-      }
+      actions={today.semester && <Unplanned today={today} />}
     />
   );
 
@@ -521,74 +386,79 @@ export function TodayScreen({ today }: { today: Today }) {
     today.sessions.find((s) => s.status === 'planned' && s.end > today.now) ?? today.next;
 
   return (
-    <>
+    <div className="today-home">
       {header}
-      <div className="split">
-        <div className="stack-lg">
-          {today.pendingSummary ? (
-            <SummaryCard session={today.pendingSummary} zone={zone} />
-          ) : upcoming ? (
-            <NextHero session={upcoming} today={today} />
-          ) : (
-            <Card>
-              <Empty icon={<Sparkles size={26} />} title="Семестр завершён">
-                Занятий больше нет — загляни в «Решения», там итоги.
-              </Empty>
-            </Card>
-          )}
-          <Card
-            title="Сегодня"
-            action={
-              <span className="faint">
-                {today.sessions.length
-                  ? `${today.sessions.length} ${plural(today.sessions.length, SESSION_FORMS)}`
-                  : ''}
-              </span>
-            }
-          >
-            {today.sessions.length === 0 ? (
-              <div className="row muted" style={{ gap: 12, flexWrap: 'nowrap' }}>
-                <span className="swatch-sm">
-                  <Coffee size={17} />
-                </span>
-                Сегодня занятий нет — можно отдохнуть или позаниматься вне расписания.
-              </div>
-            ) : (
+      <div className="today-board">
+        {today.pendingSummary ? (
+          <SummaryCard key={today.pendingSummary.id} session={today.pendingSummary} zone={zone} />
+        ) : upcoming ? (
+          <NextLesson key={upcoming.id} session={upcoming} today={today} />
+        ) : (
+          <Card>
+            <Empty
+              icon={<CalendarDays size={22} />}
+              title="Впереди нет занятий"
+              action={<a href="#schedule">Открыть расписание →</a>}
+            />
+          </Card>
+        )}
+        <Card
+          className="today-plan"
+          title="План на день"
+          action={
+            <a href="#schedule" className="today-schedule-link" aria-label="Открыть расписание">
+              <CalendarDays size={16} />
+              <ArrowRight size={14} />
+            </a>
+          }
+        >
+          {today.sessions.length ? (
+            <>
               <ol className="timeline">
-                {today.sessions.map((s) => (
+                {(showAllSessions ? today.sessions : today.sessions.slice(0, 3)).map((s) => (
                   <TimelineItem key={s.id} s={s} today={today} next={s.id === upcoming?.id} />
                 ))}
               </ol>
-            )}
-          </Card>
-        </div>
-        <div className="stack-lg">
-          {today.openDecisions > 0 && (
-            <Card className="tinted">
-              <div className="stack">
-                <div className="row" style={{ gap: 10 }}>
-                  <Inbox size={20} color="var(--violet)" />
-                  <strong>
-                    {today.openDecisions === 1
-                      ? 'Есть вопрос, который ждёт решения'
-                      : `${today.openDecisions} ${plural(today.openDecisions, ['вопрос', 'вопроса', 'вопросов'])} ждут решения`}
-                  </strong>
-                </div>
+              {today.sessions.length > 3 && (
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
-                  icon={<ArrowRight size={15} />}
-                  onClick={() => (window.location.hash = 'decisions')}
+                  onClick={() => setShowAllSessions(!showAllSessions)}
                 >
-                  Разобрать
+                  {showAllSessions
+                    ? 'Свернуть'
+                    : `Ещё ${today.sessions.length - 3} ${plural(today.sessions.length - 3, SESSION_FORMS)}`}
                 </Button>
-              </div>
-            </Card>
+              )}
+            </>
+          ) : (
+            <p className="muted">На сегодня занятий нет.</p>
           )}
-          <Pulse />
-          <Unplanned today={today} />
+        </Card>
+      </div>
+      <div className="today-footer">
+        <ProgressMini data={progress} today />
+        <div className="today-links">
+          {today.openDecisions > 0 && (
+            <a href="#decisions" className="today-decisions">
+              <Inbox size={16} />
+              Ждут решения <strong>{today.openDecisions}</strong>
+              <ArrowRight size={14} />
+            </a>
+          )}
+          <details className="today-semester" onToggle={(e) => setExpanded(e.currentTarget.open)}>
+            <summary>
+              Как идёт семестр{' '}
+              {week && week > 0 ? (
+                <small>
+                  Неделя {week} из {today.semester.fullWeeks}
+                </small>
+              ) : null}
+            </summary>
+            {expanded && <SemesterNumbers />}
+          </details>
         </div>
       </div>
-    </>
+    </div>
   );
 }
